@@ -13,6 +13,23 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "[miu-iYellowPage] ";
 
+    private static void dumpTableCounts(SQLiteDatabase db) {
+        String[] tables = {"provider", "yellow_page", "phone_lookup"};
+        for (String table : tables) {
+            Cursor c = null;
+            try {
+                c = db.rawQuery("SELECT COUNT(*) FROM " + table, null);
+                if (c.moveToFirst()) {
+                    XposedBridge.log(TAG + table + " COUNT = " + c.getInt(0));
+                }
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + table + " COUNT FAILED: " + t);
+            } finally {
+                if (c != null) c.close();
+            }
+        }
+    }
+
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) {
         if (!"com.miui.yellowpage".equals(lpparam.packageName)) return;
@@ -77,6 +94,8 @@ public class HookEntry implements IXposedHookLoadPackage {
                                 XposedBridge.log(TAG + "forcing Provider data import via L()");
                                 XposedHelpers.callMethod(helper, "L", db);
                                 XposedBridge.log(TAG + "forced Provider data import finished");
+
+                                dumpTableCounts(db);
                             } catch (Throwable t) {
                                 XposedBridge.log(TAG + "forced Provider import failed: " + t);
                             }
