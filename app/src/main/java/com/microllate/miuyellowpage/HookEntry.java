@@ -232,8 +232,8 @@ public class HookEntry implements IXposedHookLoadPackage {
         // Exact caller chain from the supplied decompiled Contacts source.
         hookContactsMethod(cl, "com.android.contacts.detail.ContactLoaderFragment$3", "X");
         hookContactsMethod(cl, "com.android.contacts.detail.ContactLoaderFragment$YellowPageLoader", "run");
-        hookContactsMethod(cl, "com.android.contacts.activities.UnknownContactActivity$AnonymousClass2", "b0");
-        hookContactsMethod(cl, "com.android.contacts.fragment.UnknownContactAtyFragment$AnonymousClass5", "b0");
+        hookContactsMethod(cl, "com.android.contacts.activities.UnknownContactActivity$2", "b0");
+        hookContactsMethod(cl, "com.android.contacts.fragment.UnknownContactAtyFragment$5", "b0");
         XposedBridge.log(TAG + "CONTACTS exact Yellow Page caller hooks installed");
 
         // Trace the Contacts-side proxy calls. Do not change any result here.
