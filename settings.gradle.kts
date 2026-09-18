@@ -12,6 +12,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://jitpack.io")
         maven("https://api.xposed.info/") {
             content { includeGroup("de.robv.android.xposed") }
         }
