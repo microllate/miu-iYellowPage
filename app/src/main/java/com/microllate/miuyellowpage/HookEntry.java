@@ -58,6 +58,38 @@ public class HookEntry implements IXposedHookLoadPackage {
                     }
             );
 
+            XposedHelpers.findAndHookMethod(
+                    dbHelperClass,
+                    "getWritableDatabase",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "getWritableDatabase()");
+                            Object result = param.getResult();
+                            if (!(result instanceof SQLiteDatabase)) return;
+                            SQLiteDatabase db = (SQLiteDatabase) result;
+                            try {
+                                XposedBridge.log(TAG + "tables: " + db.rawQuery(
+                                        "SELECT name FROM sqlite_master WHERE type='table'", null).getCount());
+                            } catch (Throwable t) {
+                                XposedBridge.log(TAG + "table list failed: " + t);
+                            }
+                            try {
+                                XposedBridge.log(TAG + "phone_lookup count=" + db.rawQuery(
+                                        "SELECT COUNT(*) FROM phone_lookup", null).getCount());
+                            } catch (Throwable t) {
+                                XposedBridge.log(TAG + "phone_lookup count failed: " + t);
+                            }
+                            try {
+                                XposedBridge.log(TAG + "yellow_page count=" + db.rawQuery(
+                                        "SELECT COUNT(*) FROM yellow_page", null).getCount());
+                            } catch (Throwable t) {
+                                XposedBridge.log(TAG + "yellow_page count failed: " + t);
+                            }
+                        }
+                    }
+            );
+
             XposedBridge.log(TAG + "DatabaseHelper.L hook installed");
 
             Class<?> providerClass = Class.forName(
