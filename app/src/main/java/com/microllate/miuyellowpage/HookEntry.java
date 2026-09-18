@@ -117,6 +117,38 @@ public class HookEntry implements IXposedHookLoadPackage {
                                     }
                                 }
                             });
+                    try {
+                        XposedHelpers.findAndHookMethod(
+                                target, "l", Context.class, new XC_MethodHook() {
+                                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                        XposedBridge.log(TAG + target.getName() + ".l() ENTER");
+                                    }
+                                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                                        XposedBridge.log(TAG + target.getName() + ".l() EXIT result="
+                                                + param.getResult());
+                                    }
+                                });
+                        XposedBridge.log(TAG + "preset l(Context) hook installed: " + target.getName());
+                    } catch (Throwable t) {
+                        XposedBridge.log(TAG + "preset l(Context) hook failed: " + t);
+                    }
+
+                    try {
+                        XposedHelpers.findAndHookMethod(
+                                target, "c", Context.class, new XC_MethodHook() {
+                                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                        XposedBridge.log(TAG + target.getName() + ".c(Context) ENTER");
+                                    }
+                                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                                        XposedBridge.log(TAG + target.getName() + ".c(Context) EXIT result="
+                                                + param.getResult());
+                                    }
+                                });
+                        XposedBridge.log(TAG + "preset c(Context) hook installed: " + target.getName());
+                    } catch (Throwable t) {
+                        XposedBridge.log(TAG + "preset c(Context) hook failed: " + t);
+                    }
+
                     XposedBridge.log(TAG + "preset h() hook installed: " + target.getName());
 
                     // One matching class is expected; stop after the first exact match.
