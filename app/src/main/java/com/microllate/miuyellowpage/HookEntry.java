@@ -247,8 +247,188 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+
+    /*
+     * Contacts-side tracing. The Yellow Page provider is already known to have
+     * usable data, so this side only answers one question:
+     * does com.android.contacts actually create the loader / call the proxy?
+     */
+    private static void installContactsDiagnostics(final XC_LoadPackage.LoadPackageParam lpparam) {
+        final ClassLoader cl = lpparam.classLoader;
+        final String apkPath;
+        try {
+            apkPath = lpparam.appInfo.sourceDir;
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Contacts sourceDir failed: " + t);
+            return;
+        }
+
+        try {
+            DexFile dex = new DexFile(apkPath);
+            Enumeration<String> entries = dex.entries();
+            int scanned = 0;
+            int proxyCandidates = 0;
+            int loaderCandidates = 0;
+            int dialerCandidates = 0;
+            int loaderManagerCandidates = 0;
+
+            while (entries.hasMoreElements()) {
+                String name = entries.nextElement();
+                scanned++;
+                if (name.indexOf('.') < 0) continue;
+
+                try {
+                    Class<?> cls = Class.forName(name, false, cl);
+
+                    if (name.contains("YellowPageProxy")) {
+                        proxyCandidates++;
+                        XposedBridge.log(TAG + "CONTACTS proxy candidate: " + name);
+                        for (Method m : cls.getDeclaredMethods()) {
+                            String mn = m.getName();
+                            if ("j".equals(mn) || "r".equals(mn) || "q".equals(mn)
+                                    || "o".equals(mn) || "p".equals(mn)) {
+                                try {
+                                    final String methodName = mn;
+                                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                            XposedBridge.log(TAG + "CONTACTS Proxy." + methodName
+                                                    + " ENTER args=" + java.util.Arrays.toString(param.args)
+                                                    + "\n" + android.util.Log.getStackTraceString(
+                                                    new Throwable("CALL STACK")));
+                                        }
+
+                                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                                            if (param.hasThrowable()) {
+                                                XposedBridge.log(TAG + "CONTACTS Proxy." + methodName
+                                                        + " THREW " + android.util.Log.getStackTraceString(
+                                                        param.getThrowable()));
+                                            } else {
+                                                Object result = param.getResult();
+                                                XposedBridge.log(TAG + "CONTACTS Proxy." + methodName
+                                                        + " EXIT result="
+                                                        + (result == null ? "null" : result.getClass().getName())
+                                                        + " value=" + String.valueOf(result));
+                                            }
+                                        }
+                                    });
+                                    XposedBridge.log(TAG + "CONTACTS Proxy." + methodName
+                                            + " hook installed: " + m);
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "CONTACTS Proxy." + mn
+                                            + " hook failed: " + t);
+                                }
+                            }
+                        }
+                    }
+
+                    if (name.contains("YellowPagePhoneLoader")) {
+                        loaderCandidates++;
+                        XposedBridge.log(TAG + "CONTACTS loader candidate: " + name);
+                        for (java.lang.reflect.Constructor<?> ctor : cls.getDeclaredConstructors()) {
+                            try {
+                                XposedBridge.hookMethod(ctor, new XC_MethodHook() {
+                                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                        XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW args="
+                                                + java.util.Arrays.toString(param.args)
+                                                + "\n" + android.util.Log.getStackTraceString(
+                                                new Throwable("LOADER NEW STACK")));
+                                    }
+
+                                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                                        if (param.hasThrowable()) {
+                                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW THREW "
+                                                    + android.util.Log.getStackTraceString(param.getThrowable()));
+                                        } else {
+                                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW OK");
+                                        }
+                                    }
+                                });
+                            } catch (Throwable t) {
+                                XposedBridge.log(TAG + "CONTACTS loader constructor hook failed: " + t);
+                            }
+                        }
+                    }
+
+                    if (name.contains("TwelveKeyDialerFragment")) {
+                        dialerCandidates++;
+                        XposedBridge.log(TAG + "CONTACTS dialer candidate: " + name);
+                        for (Method m : cls.getDeclaredMethods()) {
+                            if ("F4".equals(m.getName())) {
+                                try {
+                                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                            XposedBridge.log(TAG + "CONTACTS TwelveKeyDialerFragment.F4 ENTER"
+                                                    + " args=" + java.util.Arrays.toString(param.args));
+                                        }
+                                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                                            if (param.hasThrowable()) {
+                                                XposedBridge.log(TAG + "CONTACTS TwelveKeyDialerFragment.F4 THREW "
+                                                        + android.util.Log.getStackTraceString(param.getThrowable()));
+                                            } else {
+                                                XposedBridge.log(TAG + "CONTACTS TwelveKeyDialerFragment.F4 EXIT result="
+                                                        + String.valueOf(param.getResult()));
+                                            }
+                                        }
+                                    });
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "CONTACTS F4 hook failed: " + t);
+                                }
+                            }
+                        }
+                    }
+
+                    if (name.equals("androidx.loader.app.LoaderManager")
+                            || name.endsWith(".LoaderManager")) {
+                        loaderManagerCandidates++;
+                        XposedBridge.log(TAG + "CONTACTS LoaderManager candidate: " + name);
+                        for (Method m : cls.getDeclaredMethods()) {
+                            String mn = m.getName();
+                            if ("initLoader".equals(mn) || "restartLoader".equals(mn)
+                                    || "destroyLoader".equals(mn)) {
+                                try {
+                                    final String methodName = mn;
+                                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                            XposedBridge.log(TAG + "CONTACTS LoaderManager."
+                                                    + methodName + " ENTER args="
+                                                    + java.util.Arrays.toString(param.args)
+                                                    + "\n" + android.util.Log.getStackTraceString(
+                                                    new Throwable("LOADER MANAGER STACK")));
+                                        }
+                                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                                            XposedBridge.log(TAG + "CONTACTS LoaderManager."
+                                                    + methodName + " EXIT result="
+                                                    + String.valueOf(param.getResult()));
+                                        }
+                                    });
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "CONTACTS LoaderManager." + mn
+                                            + " hook failed: " + t);
+                                }
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+            dex.close();
+
+            XposedBridge.log(TAG + "CONTACTS scan finished scanned=" + scanned
+                    + " proxyCandidates=" + proxyCandidates
+                    + " loaderCandidates=" + loaderCandidates
+                    + " dialerCandidates=" + dialerCandidates
+                    + " loaderManagerCandidates=" + loaderManagerCandidates);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "CONTACTS scan failed: " + t);
+        }
+    }
+
     @Override
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) {
+        if ("com.android.contacts".equals(lpparam.packageName)) {
+            installContactsDiagnostics(lpparam);
+            return;
+        }
         if (!"com.miui.yellowpage".equals(lpparam.packageName)) return;
 
         try {
