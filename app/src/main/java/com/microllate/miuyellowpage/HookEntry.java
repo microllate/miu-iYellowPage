@@ -97,6 +97,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                                 @Override
                                 protected void afterHookedMethod(MethodHookParam param) {
                                     try {
+                                        XposedBridge.log(TAG + "preset h() invoked on " + target.getName());
                                         int resId = context.getResources().getIdentifier(
                                                 "yellow_pages_cn",
                                                 "raw",
