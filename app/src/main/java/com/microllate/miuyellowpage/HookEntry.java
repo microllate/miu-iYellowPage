@@ -19,42 +19,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "[miu-iYellowPage] ";
 
-    private static void diagnosePhoneLookup(Context context, Class<?> dbHelperClass, ClassLoader cl, String number) {
-        SQLiteDatabase db = null;
-        Cursor c = null;
-        try {
-            Object helper = XposedHelpers.callStaticMethod(dbHelperClass, "E", context);
-            db = (SQLiteDatabase) XposedHelpers.callMethod(helper, "getReadableDatabase");
-            if (db == null) {
-                XposedBridge.log(TAG + "diagnose: readableDatabase=null");
-                return;
-            }
-            c = db.rawQuery("SELECT number, normalized_number, min_match, yid, yellow_page_name FROM phone_lookup WHERE number=? OR normalized_number=? LIMIT 20", new String[]{number, number});
-            int count = c.getCount();
-            XposedBridge.log(TAG + "diagnose: phone_lookup direct match " + number + " count=" + count);
-            while (c.moveToNext()) {
-                XposedBridge.log(TAG + "diagnose row: number=" + c.getString(0)
-                        + " normalized=" + c.getString(1)
-                        + " min_match=" + c.getString(2)
-                        + " yid=" + c.getString(3)
-                        + " name=" + c.getString(4));
-            }
-            c.close(); c = null;
-            c = db.rawQuery("SELECT number, normalized_number, min_match, yid, yellow_page_name FROM phone_lookup LIMIT 5", null);
-            while (c.moveToNext()) {
-                XposedBridge.log(TAG + "diagnose sample: number=" + c.getString(0)
-                        + " normalized=" + c.getString(1)
-                        + " min_match=" + c.getString(2)
-                        + " yid=" + c.getString(3)
-                        + " name=" + c.getString(4));
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "diagnose direct DB failed: " + t);
-        } finally {
-            if (c != null) try { c.close(); } catch (Throwable ignored) {}
-        }
-    }
-
     private static void diagnoseYellowPageJoin(SQLiteDatabase db, String number) {
         Cursor c = null;
         try {
@@ -90,23 +54,6 @@ public class HookEntry implements IXposedHookLoadPackage {
             XposedBridge.log(TAG + "diagnose JOIN failed: " + t);
         } finally {
             if (c != null) try { c.close(); } catch (Throwable ignored) {}
-        }
-    }
-
-    private static void dumpTableCounts(SQLiteDatabase db) {
-        String[] tables = {"provider", "yellow_page", "phone_lookup", "t9_lookup"};
-        for (String table : tables) {
-            Cursor c = null;
-            try {
-                c = db.rawQuery("SELECT COUNT(*) FROM " + table, null);
-                if (c.moveToFirst()) {
-                    XposedBridge.log(TAG + table + " COUNT = " + c.getInt(0));
-                }
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + table + " COUNT FAILED: " + t);
-            } finally {
-                if (c != null) c.close();
-            }
         }
     }
 
@@ -565,66 +512,6 @@ public class HookEntry implements IXposedHookLoadPackage {
                         }
                     });
 
-            // Diagnostic: Provider uses the 7-argument SQLiteDatabase.query() overload.
-            try {
-                XposedHelpers.findAndHookMethod(
-                        SQLiteDatabase.class, "query",
-                        String.class, String[].class, String.class, String[].class,
-                        String.class, String.class, String.class,
-                        new XC_MethodHook() {
-                            @Override protected void beforeHookedMethod(MethodHookParam param) {
-                                try {
-                                    String table = (String) param.args[0];
-                                    if (table != null && table.contains("phone_lookup")) {
-                                        XposedBridge.log(TAG + "SQLite.query PHONE_LOOKUP"
-                                                + " table=" + table
-                                                + " columns=" + java.util.Arrays.toString((String[]) param.args[1])
-                                                + " selection=" + param.args[2]
-                                                + " args=" + java.util.Arrays.toString((String[]) param.args[3])
-                                                + " groupBy=" + param.args[4]
-                                                + " having=" + param.args[5]
-                                                + " orderBy=" + param.args[6]);
-                                    }
-                                } catch (Throwable t) {
-                                    XposedBridge.log(TAG + "SQLite.query diagnostic failed: " + t);
-                                }
-                            }
-                            @Override protected void afterHookedMethod(MethodHookParam param) {
-                                try {
-                                    String table = (String) param.args[0];
-                                    if (table != null && table.contains("phone_lookup")) {
-                                        Object result = param.getResult();
-                                        if (result instanceof Cursor) {
-                                            Cursor c = (Cursor) result;
-                                            XposedBridge.log(TAG + "SQLite.query PHONE_LOOKUP RESULT"
-                                                    + " count=" + c.getCount()
-                                                    + " columns=" + java.util.Arrays.toString(c.getColumnNames()));
-                                            if (c.moveToFirst()) {
-                                                StringBuilder row = new StringBuilder();
-                                                String[] cols = c.getColumnNames();
-                                                for (int i = 0; i < cols.length; i++) {
-                                                    if (i > 0) row.append(" | ");
-                                                    row.append(cols[i]).append("=").append(c.getString(i));
-                                                }
-                                                XposedBridge.log(TAG + "SQLite.query first row: " + row);
-                                            } else {
-                                                XposedBridge.log(TAG + "SQLite.query RESULT moveToFirst=false");
-                                            }
-                                        } else {
-                                            XposedBridge.log(TAG + "SQLite.query RESULT non-Cursor="
-                                                    + (result == null ? "null" : result.getClass().getName()));
-                                        }
-                                    }
-                                } catch (Throwable t) {
-                                    XposedBridge.log(TAG + "SQLite.query result diagnostic failed: " + t);
-                                }
-                            }
-                        });
-                XposedBridge.log(TAG + "SQLiteDatabase.query(7 args) diagnostic hook installed");
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + "SQLiteDatabase.query diagnostic hook failed: " + t);
-            }
-
             XposedHelpers.findAndHookMethod(
                     providerClass, "query",
                     android.net.Uri.class, String[].class, String.class,
@@ -636,13 +523,11 @@ public class HookEntry implements IXposedHookLoadPackage {
                                     + " args=" + java.util.Arrays.toString((String[]) param.args[3])
                                     + " sort=" + param.args[4]);
                             try {
-                                Context context = (Context) XposedHelpers.callMethod(param.thisObject, "getContext");
-                                diagnosePhoneLookup(context, dbHelperClass, cl, "10086");
-                                Object helper = XposedHelpers.callStaticMethod(dbHelperClass, "E", context);
-                                SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(helper, "getReadableDatabase");
-                                diagnoseYellowPageJoin(db, "10086");
+                                Object calling = XposedHelpers.callMethod(param.thisObject, "getCallingPackage");
+                                XposedBridge.log(TAG + "Provider.query callingPackage=" + calling
+                                        + " uid=" + android.os.Binder.getCallingUid());
                             } catch (Throwable t) {
-                                XposedBridge.log(TAG + "diagnose hook invocation failed: " + t);
+                                XposedBridge.log(TAG + "Provider.query caller diagnostic failed: " + t);
                             }
                         }
                         @Override protected void afterHookedMethod(MethodHookParam param) {
@@ -700,8 +585,6 @@ public class HookEntry implements IXposedHookLoadPackage {
                                             recovery.close();
                                             param.setResult(matrix);
                                             result = matrix;
-                                            XposedBridge.log(TAG + "Provider recovery: returned MatrixCursor columns="
-                                                    + java.util.Arrays.toString(recoveryColumns));
                                         } else if (recovery != null) {
                                             recovery.close();
                                         }
@@ -718,17 +601,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                             if (result instanceof Cursor) {
                                 Cursor cursor = (Cursor) result;
                                 try {
-                                    XposedBridge.log(TAG + "query cursor count=" + cursor.getCount()
-                                            + " columns=" + java.util.Arrays.toString(cursor.getColumnNames()));
-                                    if (cursor.moveToFirst()) {
-                                        StringBuilder row = new StringBuilder();
-                                        String[] cols = cursor.getColumnNames();
-                                        for (int i = 0; i < cols.length; i++) {
-                                            if (i > 0) row.append(" | ");
-                                            row.append(cols[i]).append("=").append(cursor.getString(i));
-                                        }
-                                        XposedBridge.log(TAG + "query first row: " + row);
-                                    }
+                                    XposedBridge.log(TAG + "Provider.query result count=" + cursor.getCount());
                                 } catch (Throwable t) {
                                     XposedBridge.log(TAG + "cursor inspect failed: " + t);
                                 }
