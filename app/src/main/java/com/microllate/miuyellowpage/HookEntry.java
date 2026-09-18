@@ -34,6 +34,19 @@ public class HookEntry implements IXposedHookLoadPackage {
                     }
             );
 
+            try {
+                XposedHelpers.findAndHookMethod("miui.yellowpage.YellowPageUtils", cl, "isYellowPageEnable", Context.class, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        boolean old = Boolean.TRUE.equals(param.getResult());
+                        param.setResult(true);
+                        XposedBridge.log(TAG + "isYellowPageEnable() " + old + " -> true");
+                    }
+                });
+                XposedBridge.log(TAG + "enable hook installed");
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "enable hook failed: " + t);
+            }
+
             XposedBridge.log(TAG + "availability hook installed");
 
             Class<?> dbHelperClass = Class.forName(
