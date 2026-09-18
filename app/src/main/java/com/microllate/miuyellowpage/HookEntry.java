@@ -212,6 +212,8 @@ public class HookEntry implements IXposedHookLoadPackage {
                             try {
                                 Context context = (Context) XposedHelpers.callMethod(
                                         param.thisObject, "getContext");
+                                XposedBridge.log(TAG + "scanning preset provider before database open");
+                                findAndHookPresetProvider(cl, context);
                                 Object helper = XposedHelpers.callStaticMethod(
                                         dbHelperClass, "E", context);
                                 SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
