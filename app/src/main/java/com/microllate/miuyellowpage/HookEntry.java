@@ -1,7 +1,7 @@
 package com.microllate.miuyellowpage;
 
 import android.content.Context;
-import android.net.Uri;
+import android.database.sqlite.SQLiteDatabase;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -17,41 +17,8 @@ public class HookEntry implements IXposedHookLoadPackage {
         if (!"com.miui.yellowpage".equals(lpparam.packageName)) return;
 
         try {
-            ClassLoader cl = lpparam.classLoader;
+            final ClassLoader cl = lpparam.classLoader;
 
-            // EEA feature manager. JADX shows:
-            // p007c0.b.e(Context, p007c0.a)
-            // YELLOWPAGE_PROVIDER controls YellowPageDatabaseHelper.L()
-            // and YELLOWPAGE_SYNC controls the cloud sync path.
-            Class<?> featureEnum = Class.forName("p007c0.a", false, cl);
-            XposedHelpers.findAndHookMethod(
-                    "p007c0.b",
-                    cl,
-                    "e",
-                    Context.class,
-                    featureEnum,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            Object feature = param.args[1];
-                            if (feature == null) return;
-
-                            String name = String.valueOf(feature);
-                            if ("YELLOWPAGE_PROVIDER".equals(name)
-                                    || "YELLOWPAGE_SYNC".equals(name)
-                                    || "YELLOW_PAGE".equals(name)) {
-                                boolean oldResult = Boolean.TRUE.equals(param.getResult());
-                                param.setResult(true);
-                                XposedBridge.log(TAG + "feature " + name
-                                        + ": " + oldResult + " -> true");
-                            }
-                        }
-                    }
-            );
-
-            XposedBridge.log(TAG + "feature gate hook installed");
-
-            // Keep the public availability gate enabled as well.
             XposedHelpers.findAndHookMethod(
                     "miui.yellowpage.YellowPageUtils",
                     cl,
@@ -66,9 +33,35 @@ public class HookEntry implements IXposedHookLoadPackage {
                     }
             );
 
-            // Diagnostic Provider hooks.
+            XposedBridge.log(TAG + "availability hook installed");
+
+            Class<?> dbHelperClass = Class.forName(
+                    "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
+                    false,
+                    cl
+            );
+
+            XposedHelpers.findAndHookMethod(
+                    dbHelperClass,
+                    "L",
+                    SQLiteDatabase.class,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "YellowPageDatabaseHelper.L() ENTER");
+                        }
+
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "YellowPageDatabaseHelper.L() EXIT");
+                        }
+                    }
+            );
+
+            XposedBridge.log(TAG + "DatabaseHelper.L hook installed");
+
             Class<?> providerClass = Class.forName(
-                    "miui.yellowpage.providers.yellowpage.YellowPageProvider",
+                    "com.miui.yellowpage.providers.yellowpage.YellowPageProvider",
                     false,
                     cl
             );
@@ -87,7 +80,7 @@ public class HookEntry implements IXposedHookLoadPackage {
             XposedHelpers.findAndHookMethod(
                     providerClass,
                     "query",
-                    Uri.class,
+                    android.net.Uri.class,
                     String[].class,
                     String.class,
                     String[].class,
@@ -107,7 +100,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                     }
             );
 
-            XposedBridge.log(TAG + "Provider class resolved: " + providerClass.getName());
+            XposedBridge.log(TAG + "Provider hooks installed");
             XposedBridge.log(TAG + "HookEntry initialized");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "HookEntry failed: " + t);
