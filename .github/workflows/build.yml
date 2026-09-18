@@ -2,7 +2,8 @@ name: Build LSPosed module
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -12,30 +13,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "17"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.11.1"
+          gradle-version: "8.7"
 
-      - name: Build
-        run: gradle --no-daemon assembleRelease
+      - name: Build release APK
+        run: gradle --no-daemon --stacktrace assembleRelease
 
-      - name: Rename APK
+      - name: Collect APK
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/miu-iYellowPage-debugtest.apk
+          cp app/build/outputs/apk/release/app-release.apk dist/miu-iYellowPage.apk
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: miu-iYellowPage
-          path: dist/miu-iYellowPage-debugtest.apk
+          path: dist/miu-iYellowPage.apk
