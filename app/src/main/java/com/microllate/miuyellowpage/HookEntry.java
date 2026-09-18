@@ -14,7 +14,7 @@ public class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "[miu-iYellowPage] ";
 
     private static void dumpTableCounts(SQLiteDatabase db) {
-        String[] tables = {"provider", "yellow_page", "phone_lookup"};
+        String[] tables = {"provider", "yellow_page", "phone_lookup", "t9_lookup"};
         for (String table : tables) {
             Cursor c = null;
             try {
@@ -61,8 +61,66 @@ public class HookEntry implements IXposedHookLoadPackage {
                 XposedBridge.log(TAG + "enable hook failed: " + t);
             }
 
+            // EEA: p052r0.c.h() returns -1 on international builds.
+            // Force it to expose the APK's bundled yellow_pages_cn resource.
+            try {
+                Class<?> dataProviderClass = Class.forName("p052r0.c", false, cl);
+                XposedHelpers.findAndHookMethod(
+                        dataProviderClass, "h", new XC_MethodHook() {
+                            @Override protected void afterHookedMethod(MethodHookParam param) {
+                                try {
+                                    Context context = lpparam.appInfo != null
+                                            ? null : null;
+                                    int resId = 0;
+                                    try {
+                                        Class<?> appClass = Class.forName(
+                                                "com.miui.yellowpage.YellowPageApplication",
+                                                false, cl);
+                                        Object app = appClass;
+                                    } catch (Throwable ignored) {
+                                    }
+
+                                    // Obtain the package resources through the current
+                                    // Yellow Page package context without depending on
+                                    // an obfuscated Application class.
+                                    try {
+                                        Object activityThread = XposedHelpers.callStaticMethod(
+                                                Class.forName("android.app.ActivityThread", false, null),
+                                                "currentApplication");
+                                        if (activityThread instanceof android.app.Application) {
+                                            context = (Context) activityThread;
+                                        }
+                                    } catch (Throwable ignored) {
+                                    }
+
+                                    if (context != null) {
+                                        resId = context.getResources().getIdentifier(
+                                                "yellow_pages_cn", "raw", "com.miui.yellowpage");
+                                    }
+
+                                    if (resId != 0) {
+                                        int old = (Integer) param.getResult();
+                                        param.setResult(resId);
+                                        XposedBridge.log(TAG +
+                                                "p052r0.c.h() " + old + " -> " + resId +
+                                                " (force yellow_pages_cn)");
+                                    } else {
+                                        XposedBridge.log(TAG +
+                                                "p052r0.c.h(): yellow_pages_cn resource NOT FOUND");
+                                    }
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "p052r0.c.h() hook failed: " + t);
+                                }
+                            }
+                        });
+                XposedBridge.log(TAG + "p052r0.c.h hook installed");
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "p052r0.c.h hook failed: " + t);
+            }
+
             Class<?> dbHelperClass = Class.forName(
-                    "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper", false, cl);
+                    "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
+                    false, cl);
 
             XposedHelpers.findAndHookMethod(
                     dbHelperClass, "L", SQLiteDatabase.class, new XC_MethodHook() {
@@ -74,6 +132,21 @@ public class HookEntry implements IXposedHookLoadPackage {
                         }
                     });
             XposedBridge.log(TAG + "DatabaseHelper.L hook installed");
+
+            // N() is the actual preset YellowPage importer.
+            XposedHelpers.findAndHookMethod(
+                    dbHelperClass, "N", Context.class, SQLiteDatabase.class,
+                    new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() ENTER");
+                        }
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            SQLiteDatabase db = (SQLiteDatabase) param.args[1];
+                            XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() EXIT");
+                            dumpTableCounts(db);
+                        }
+                    });
+            XposedBridge.log(TAG + "DatabaseHelper.N hook installed");
 
             Class<?> providerClass = Class.forName(
                     "com.miui.yellowpage.providers.yellowpage.YellowPageProvider", false, cl);
