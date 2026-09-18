@@ -24,6 +24,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         scanAndHookLoader(lp.classLoader);
         hookLoaderCallers(lp.classLoader);
         hookLoaderManager(lp.classLoader);
+        hookBaseLoader(lp.classLoader);
         hookContentResolver(lp.classLoader);
     }
 
@@ -281,6 +282,43 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                 XposedBridge.log(TAG + " CALLER FAIL " + target[0]
                         + "." + target[1] + ": " + e);
             }
+        }
+    }
+
+    private static void hookBaseLoader(final ClassLoader cl) {
+        try {
+            Class<?> c = XposedHelpers.findClass("androidx.loader.content.Loader", cl);
+            for (final Constructor<?> x : c.getDeclaredConstructors()) {
+                hookOnce(x, new XC_MethodHook() {
+                    protected void afterHookedMethod(MethodHookParam p) {
+                        Object self = p.thisObject;
+                        if (self == null) return;
+                        String n = self.getClass().getName();
+                        if (n.toLowerCase().contains("yellowpage")) {
+                            XposedBridge.log(TAG + " BASE LOADER NEW " + n + " " + x.toGenericString());
+                            stack("BASE LOADER NEW");
+                        }
+                    }
+                });
+            }
+            for (final Method m : c.getDeclaredMethods()) {
+                if (!m.getName().equals("y") && !m.getName().equals("h")
+                        && !m.getName().equals("b")) continue;
+                hookOnce(m, new XC_MethodHook() {
+                    protected void beforeHookedMethod(MethodHookParam p) {
+                        Object self = p.thisObject;
+                        if (self == null) return;
+                        String n = self.getClass().getName();
+                        if (n.toLowerCase().contains("yellowpage")) {
+                            XposedBridge.log(TAG + " BASE LOADER CALL " + n + "." + m.getName());
+                            stack("BASE LOADER " + m.getName());
+                        }
+                    }
+                });
+            }
+            XposedBridge.log(TAG + " Base Loader hooks installed");
+        } catch (Throwable e) {
+            XposedBridge.log(TAG + " Base Loader hook failed: " + e);
         }
     }
 
