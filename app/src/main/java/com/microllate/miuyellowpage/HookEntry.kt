@@ -23,9 +23,9 @@ class HookEntry : IYukiHookXposedInit {
                         }
                     }
                 }
-                loggerD(msg = "[miu-iYellowPage] k() hook initialized")
-            } catch (err: Throwable) {
-                loggerD(msg = "[miu-iYellowPage] initialization failed: ${err.stackTraceToString()}")
+                loggerD(msg = "[miu-iYellowPage] hooks initialized")
+            } catch (e: Throwable) {
+                loggerD(msg = "[miu-iYellowPage] initialization failed: " + e.stackTraceToString())
             }
         }
     }
