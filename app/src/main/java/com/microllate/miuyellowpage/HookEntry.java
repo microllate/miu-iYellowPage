@@ -223,6 +223,10 @@ public class HookEntry implements IXposedHookLoadPackage {
                                 XposedHelpers.callMethod(helper, "L", db);
                                 XposedBridge.log(TAG + "forced Provider data import finished");
 
+                                XposedBridge.log(TAG + "forcing preset Yellow Page import via N()");
+                                XposedHelpers.callMethod(helper, "N", context, db);
+                                XposedBridge.log(TAG + "forced preset Yellow Page import finished");
+
                                 dumpTableCounts(db);
                             } catch (Throwable t) {
                                 XposedBridge.log(TAG + "forced Provider import failed: " + t);
