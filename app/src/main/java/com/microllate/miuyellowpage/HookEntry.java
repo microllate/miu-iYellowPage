@@ -362,12 +362,12 @@ public class HookEntry implements IXposedHookLoadPackage {
                         }
                     });
 
-            // Diagnostic: intercept SQLiteDatabase.query() to see the exact SQL inputs used by YellowPageProvider.
+            // Diagnostic: Provider uses the 7-argument SQLiteDatabase.query() overload.
             try {
                 XposedHelpers.findAndHookMethod(
                         SQLiteDatabase.class, "query",
                         String.class, String[].class, String.class, String[].class,
-                        String.class, String.class, String.class, String.class,
+                        String.class, String.class, String.class,
                         new XC_MethodHook() {
                             @Override protected void beforeHookedMethod(MethodHookParam param) {
                                 try {
@@ -380,15 +380,14 @@ public class HookEntry implements IXposedHookLoadPackage {
                                                 + " args=" + java.util.Arrays.toString((String[]) param.args[3])
                                                 + " groupBy=" + param.args[4]
                                                 + " having=" + param.args[5]
-                                                + " orderBy=" + param.args[6]
-                                                + " limit=" + param.args[7]);
+                                                + " orderBy=" + param.args[6]);
                                     }
                                 } catch (Throwable t) {
                                     XposedBridge.log(TAG + "SQLite.query diagnostic failed: " + t);
                                 }
                             }
                         });
-                XposedBridge.log(TAG + "SQLiteDatabase.query diagnostic hook installed");
+                XposedBridge.log(TAG + "SQLiteDatabase.query(7 args) diagnostic hook installed");
             } catch (Throwable t) {
                 XposedBridge.log(TAG + "SQLiteDatabase.query diagnostic hook failed: " + t);
             }
