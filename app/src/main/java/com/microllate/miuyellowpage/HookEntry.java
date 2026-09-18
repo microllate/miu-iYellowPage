@@ -54,6 +54,44 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    private static void diagnoseYellowPageJoin(SQLiteDatabase db, String number) {
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT yid, content FROM yellow_page WHERE yid=307", null);
+            XposedBridge.log(TAG + "diagnose: yellow_page yid=307 count=" + c.getCount());
+            while (c.moveToNext()) {
+                XposedBridge.log(TAG + "diagnose yellow_page: yid=" + c.getString(0)
+                        + " contentLength=" + (c.isNull(1) ? "null" : c.getString(1).length()));
+            }
+            c.close(); c = null;
+
+            c = db.rawQuery("SELECT pl.number, pl.normalized_number, pl.yid, yp.yid, yp.content "
+                    + "FROM phone_lookup pl LEFT JOIN yellow_page yp ON pl.yid=yp.yid "
+                    + "WHERE pl.number=? OR pl.normalized_number=?", new String[]{number, number});
+            XposedBridge.log(TAG + "diagnose: phone_lookup LEFT JOIN yellow_page for "
+                    + number + " count=" + c.getCount());
+            while (c.moveToNext()) {
+                XposedBridge.log(TAG + "diagnose JOIN row: number=" + c.getString(0)
+                        + " normalized=" + c.getString(1)
+                        + " pl.yid=" + c.getString(2)
+                        + " yp.yid=" + c.getString(3)
+                        + " yp.contentLength=" + (c.isNull(4) ? "null" : c.getString(4).length()));
+            }
+            c.close(); c = null;
+
+            c = db.rawQuery("SELECT COUNT(*) FROM phone_lookup pl INNER JOIN yellow_page yp ON pl.yid=yp.yid "
+                    + "WHERE pl.normalized_number=?", new String[]{number});
+            if (c.moveToFirst()) {
+                XposedBridge.log(TAG + "diagnose: INNER JOIN normalized_number=" + number
+                        + " count=" + c.getInt(0));
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "diagnose JOIN failed: " + t);
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
+
     private static void dumpTableCounts(SQLiteDatabase db) {
         String[] tables = {"provider", "yellow_page", "phone_lookup", "t9_lookup"};
         for (String table : tables) {
@@ -337,6 +375,9 @@ public class HookEntry implements IXposedHookLoadPackage {
                             try {
                                 Context context = (Context) XposedHelpers.callMethod(param.thisObject, "getContext");
                                 diagnosePhoneLookup(context, dbHelperClass, cl, "10086");
+                                Object helper = XposedHelpers.callStaticMethod(dbHelperClass, "E", context);
+                                SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(helper, "getReadableDatabase");
+                                diagnoseYellowPageJoin(db, "10086");
                             } catch (Throwable t) {
                                 XposedBridge.log(TAG + "diagnose hook invocation failed: " + t);
                             }
