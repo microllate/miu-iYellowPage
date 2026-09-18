@@ -150,8 +150,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             StackTraceElement[] s = new Throwable().getStackTrace();
             StringBuilder b = new StringBuilder(TAG + " STACK " + label);
             for (int i = 2; i < Math.min(s.length, 12); i++) {
-                b.append("
-  at ").append(s[i]);
+                b.append("\\n  at ").append(s[i]);
             }
             XposedBridge.log(b.toString());
         } catch (Throwable ignored) {}
