@@ -2,7 +2,6 @@ package com.microllate.miuyellowpage;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
-import java.util.HashSet;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -19,11 +18,11 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         if (!CONTACTS.equals(lp.packageName)) return;
         XposedBridge.log(TAG + " CONTACTS loaded: " + lp.processName);
         hookProxy(lp.classLoader);
+        hookYellowPageUtils(lp.classLoader);
         hookRuntimeBridge(lp.classLoader);
         scanAndHookLoader(lp.classLoader);
         hookContentResolver(lp.classLoader);
     }
-
 
     private static void hookProxy(final ClassLoader cl) {
         try {
@@ -40,9 +39,10 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                             traceJCaller();
                             p.setResult(true);
                         } else {
-                            XposedBridge.log(TAG + " YP " + m.getName() + " CALL");
+                            XposedBridge.log(TAG + " YP " + m.getName() + " CALL" + args(p.args));
                         }
                     }
+
                     protected void afterHookedMethod(MethodHookParam p) {
                         if (!m.getName().equals("j")) {
                             XposedBridge.log(TAG + " YP " + m.getName() + " RET " + safe(p.getResult()));
@@ -57,6 +57,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
     }
 
     private static boolean tracedJ;
+
     private static void traceJCaller() {
         if (tracedJ) return;
         tracedJ = true;
@@ -75,6 +76,57 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         } catch (Throwable ignored) {}
     }
 
+    private static void hookYellowPageUtils(final ClassLoader cl) {
+        try {
+            Class<?> c = XposedHelpers.findClass("miui.yellowpage.YellowPageUtils", cl);
+            int count = 0;
+
+            for (final Method m : c.getDeclaredMethods()) {
+                String n = m.getName();
+                if (!n.equals("isYellowPageAvailable")
+                        && !n.equals("isYellowPageEnable")
+                        && !n.equals("isCloudAntispamEnable")
+                        && !n.equals("getLocalYellowPagePhones")
+                        && !n.equals("getPhoneInfo")
+                        && !n.equals("getAntispamNumberCategory")
+                        && !n.equals("queryPhoneInfo")
+                        && !n.equals("isContentProviderInstalled")
+                        && !n.equals("getNormalizedNumber")) {
+                    continue;
+                }
+
+                hookOnce(m, new XC_MethodHook() {
+                    protected void beforeHookedMethod(MethodHookParam p) {
+                        String n = m.getName();
+                        if (n.equals("getLocalYellowPagePhones")
+                                || n.equals("getPhoneInfo")
+                                || n.equals("getAntispamNumberCategory")
+                                || n.equals("queryPhoneInfo")) {
+                            XposedBridge.log(TAG + " UTILS " + n + " CALL" + args(p.args));
+                        } else {
+                            XposedBridge.log(TAG + " UTILS " + n + " CALL" + args(p.args));
+                        }
+                    }
+
+                    protected void afterHookedMethod(MethodHookParam p) {
+                        String n = m.getName();
+                        XposedBridge.log(TAG + " UTILS " + n + " RET " + safe(p.getResult()));
+                        if (n.equals("isYellowPageAvailable")
+                                || n.equals("isCloudAntispamEnable")
+                                || n.equals("isYellowPageEnable")) {
+                            stack("UTILS " + n);
+                        }
+                    }
+                });
+                count++;
+            }
+
+            XposedBridge.log(TAG + " YellowPageUtils hooks installed methods=" + count);
+        } catch (Throwable e) {
+            XposedBridge.log(TAG + " YellowPageUtils hook failed: " + e);
+        }
+    }
+
     private static void hookRuntimeBridge(final ClassLoader cl) {
         try {
             Class<?> c;
@@ -83,12 +135,14 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             } catch (Throwable e) {
                 c = Class.forName("android.hardware.SilngShost", false, ClassLoader.getSystemClassLoader());
             }
+
             for (final Method m : c.getDeclaredMethods()) {
                 if (!m.getName().equals("j")) continue;
                 hookOnce(m, new XC_MethodHook() {
                     protected void beforeHookedMethod(MethodHookParam p) {
                         XposedBridge.log(TAG + " BRIDGE j CALL " + m.toGenericString());
                     }
+
                     protected void afterHookedMethod(MethodHookParam p) {
                         XposedBridge.log(TAG + " BRIDGE j RET " + safe(p.getResult()));
                     }
@@ -103,6 +157,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                 "com.android.contacts.util.YellowPagePhoneLoader",
                 "com.android.contacts.yellowpage.YellowPagePhoneLoader"
         };
+
         for (String name : known) {
             try {
                 hookLoader(XposedHelpers.findClass(name, cl), name);
@@ -139,13 +194,16 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                     XposedBridge.log(TAG + " LOADER CALL " + m.toGenericString() + args(p.args));
                     stack("LOADER " + m.getName());
                 }
+
                 protected void afterHookedMethod(MethodHookParam p) {
                     XposedBridge.log(TAG + " LOADER RET " + m.getName() + " -> " + safe(p.getResult()));
                 }
             });
             count++;
         }
+
         XposedBridge.log(TAG + " LOADER FOUND " + name + " methods=" + count);
+
         try {
             for (final Constructor<?> x : c.getDeclaredConstructors()) {
                 hookOnce(x, new XC_MethodHook() {
@@ -184,6 +242,16 @@ public class YellowPageHook implements IXposedHookLoadPackage {
 
     private static void hookOnce(final Method m, final XC_MethodHook h) {
         XposedBridge.hookMethod(m, h);
+    }
+
+    private static void stack(String label) {
+        try {
+            XposedBridge.log(TAG + " STACK " + label);
+            StackTraceElement[] s = new Throwable().getStackTrace();
+            for (int i = 2; i < Math.min(s.length, 14); i++) {
+                XposedBridge.log(TAG + "   at " + s[i]);
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static String args(Object[] a) {
