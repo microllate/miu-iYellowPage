@@ -2,6 +2,7 @@ package com.microllate.miuyellowpage;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -21,6 +22,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         hookYellowPageUtils(lp.classLoader);
         hookRuntimeBridge(lp.classLoader);
         scanAndHookLoader(lp.classLoader);
+        hookLoaderCallers(lp.classLoader);
         hookContentResolver(lp.classLoader);
     }
 
@@ -35,18 +37,14 @@ public class YellowPageHook implements IXposedHookLoadPackage {
 
                 hookOnce(m, new XC_MethodHook() {
                     protected void beforeHookedMethod(MethodHookParam p) {
+                        XposedBridge.log(TAG + " YP " + m.getName() + " CALL" + args(p.args));
                         if (m.getName().equals("j")) {
                             traceJCaller();
-                            p.setResult(true);
-                        } else {
-                            XposedBridge.log(TAG + " YP " + m.getName() + " CALL" + args(p.args));
                         }
                     }
 
                     protected void afterHookedMethod(MethodHookParam p) {
-                        if (!m.getName().equals("j")) {
-                            XposedBridge.log(TAG + " YP " + m.getName() + " RET " + safe(p.getResult()));
-                        }
+                        XposedBridge.log(TAG + " YP " + m.getName() + " RET " + safe(p.getResult()));
                     }
                 });
             }
@@ -56,21 +54,19 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         }
     }
 
-    private static boolean tracedJ;
+    private static final AtomicInteger jTraceCount = new AtomicInteger();
 
     private static void traceJCaller() {
-        if (tracedJ) return;
-        tracedJ = true;
+        int count = jTraceCount.incrementAndGet();
+        if (count > 20) return;
         try {
             StackTraceElement[] s = new Throwable().getStackTrace();
-            for (int i = 2; i < s.length; i++) {
+            XposedBridge.log(TAG + " J_CALLER #" + count);
+            for (int i = 2; i < Math.min(s.length, 12); i++) {
                 String n = s[i].getClassName();
                 if (!n.contains("com.microllate.miuyellowpage")
-                        && !n.contains("de.robv.android.xposed")
-                        && !n.contains("BBrJw.")
-                        && !n.equals("r") && !n.equals("k")) {
-                    XposedBridge.log(TAG + " J_CALLER " + s[i]);
-                    return;
+                        && !n.contains("de.robv.android.xposed")) {
+                    XposedBridge.log(TAG + "   at " + s[i]);
                 }
             }
         } catch (Throwable ignored) {}
@@ -213,6 +209,43 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                 });
             }
         } catch (Throwable ignored) {}
+    }
+
+    private static void hookLoaderCallers(final ClassLoader cl) {
+        String[][] targets = {
+                {"com.android.contacts.list.TwelveKeyDialerFragment", "F4"},
+                {"com.android.contacts.dialer.serviceimpl.ContactsServiceImpl", "m"},
+                {"com.android.contacts.dialer.utils.ContactServiceUtil", "y"},
+                {"com.android.contacts.dialer.list.DialerItemVM", "L"}
+        };
+
+        for (String[] target : targets) {
+            try {
+                Class<?> c = XposedHelpers.findClass(target[0], cl);
+                int count = 0;
+                for (final Method m : c.getDeclaredMethods()) {
+                    if (!m.getName().equals(target[1])) continue;
+                    hookOnce(m, new XC_MethodHook() {
+                        protected void beforeHookedMethod(MethodHookParam p) {
+                            XposedBridge.log(TAG + " CALLER CALL " + m.toGenericString()
+                                    + args(p.args));
+                            stack("CALLER " + m.getName());
+                        }
+
+                        protected void afterHookedMethod(MethodHookParam p) {
+                            XposedBridge.log(TAG + " CALLER RET " + m.toGenericString()
+                                    + " -> " + safe(p.getResult()));
+                        }
+                    });
+                    count++;
+                }
+                XposedBridge.log(TAG + " CALLER HOOK " + target[0]
+                        + "." + target[1] + " methods=" + count);
+            } catch (Throwable e) {
+                XposedBridge.log(TAG + " CALLER FAIL " + target[0]
+                        + "." + target[1] + ": " + e);
+            }
+        }
     }
 
     private static void hookContentResolver(final ClassLoader cl) {
