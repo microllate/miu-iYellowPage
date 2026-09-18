@@ -119,7 +119,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                             });
                     try {
                         XposedHelpers.findAndHookMethod(
-                                target, "l", Context.class, new XC_MethodHook() {
+                                target.getSuperclass(), "l", Context.class, new XC_MethodHook() {
                                     @Override protected void beforeHookedMethod(MethodHookParam param) {
                                         XposedBridge.log(TAG + target.getName() + ".l() ENTER");
                                     }
@@ -128,14 +128,14 @@ public class HookEntry implements IXposedHookLoadPackage {
                                                 + param.getResult());
                                     }
                                 });
-                        XposedBridge.log(TAG + "preset l(Context) hook installed: " + target.getName());
+                        XposedBridge.log(TAG + "preset superclass l(Context) hook installed: " + target.getSuperclass().getName());
                     } catch (Throwable t) {
-                        XposedBridge.log(TAG + "preset l(Context) hook failed: " + t);
+                        XposedBridge.log(TAG + "preset superclass l(Context) hook failed: " + t);
                     }
 
                     try {
                         XposedHelpers.findAndHookMethod(
-                                target, "c", Context.class, new XC_MethodHook() {
+                                target.getSuperclass(), "c", Context.class, new XC_MethodHook() {
                                     @Override protected void beforeHookedMethod(MethodHookParam param) {
                                         XposedBridge.log(TAG + target.getName() + ".c(Context) ENTER");
                                     }
@@ -144,9 +144,9 @@ public class HookEntry implements IXposedHookLoadPackage {
                                                 + param.getResult());
                                     }
                                 });
-                        XposedBridge.log(TAG + "preset c(Context) hook installed: " + target.getName());
+                        XposedBridge.log(TAG + "preset superclass c(Context) hook installed: " + target.getSuperclass().getName());
                     } catch (Throwable t) {
-                        XposedBridge.log(TAG + "preset c(Context) hook failed: " + t);
+                        XposedBridge.log(TAG + "preset superclass c(Context) hook failed: " + t);
                     }
 
                     XposedBridge.log(TAG + "preset h() hook installed: " + target.getName());
