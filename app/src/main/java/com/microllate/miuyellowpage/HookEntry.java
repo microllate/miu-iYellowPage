@@ -219,9 +219,47 @@ public class HookEntry implements IXposedHookLoadPackage {
      */
     private static void installContactsDiagnostics(final XC_LoadPackage.LoadPackageParam lpparam) {
         final ClassLoader cl = lpparam.classLoader;
+
+        // Actual Yellow Page entry points found in the CN Contacts smali:
+        // UnknownContactActivity.Y0(number)
+        // UnknownContactAtyFragment.Y2(number)
         hookContactsTarget(cl, "com.android.contacts.activities.UnknownContactActivity", "Y0");
         hookContactsTarget(cl, "com.android.contacts.fragment.UnknownContactAtyFragment", "Y2");
+
+        // Trace the actual loader creation and its obfuscated load method.
         hookContactsLoader(cl, "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader");
+
+        // Trace the Contacts-side proxy calls. Do not change any result here.
+        try {
+            Class<?> proxy = Class.forName("com.android.contacts.util.YellowPageProxy", false, cl);
+            for (Method m : proxy.getDeclaredMethods()) {
+                String n = m.getName();
+                if ("j".equals(n) || "r".equals(n) || "q".equals(n)
+                        || "o".equals(n) || "p".equals(n)) {
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
+                                    + m.getName() + "() ENTER args="
+                                    + java.util.Arrays.toString(param.args));
+                        }
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
+                                        + m.getName() + "() THREW=" + param.getThrowable());
+                            } else {
+                                XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
+                                        + m.getName() + "() EXIT result="
+                                        + String.valueOf(param.getResult()));
+                            }
+                        }
+                    });
+                }
+            }
+            XposedBridge.log(TAG + "CONTACTS YellowPageProxy j/r/q/o/p hooks installed");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "CONTACTS YellowPageProxy hook failed: " + t);
+        }
+
         XposedBridge.log(TAG + "CONTACTS targeted diagnostics installed");
     }
 
@@ -268,17 +306,20 @@ public class HookEntry implements IXposedHookLoadPackage {
             }
 
             for (Method m : cls.getDeclaredMethods()) {
-                if ("loadInBackground".equals(m.getName())) {
+                // CN smali shows J() as the loader's loadInBackground implementation.
+                if ("J".equals(m.getName()) || "loadInBackground".equals(m.getName())) {
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader.loadInBackground ENTER");
+                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader."
+                                    + m.getName() + "() ENTER");
                         }
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             if (param.hasThrowable()) {
-                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader.loadInBackground THREW="
-                                        + param.getThrowable());
+                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader."
+                                        + m.getName() + "() THREW=" + param.getThrowable());
                             } else {
-                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader.loadInBackground EXIT result="
+                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader."
+                                        + m.getName() + "() EXIT result="
                                         + (param.getResult() == null ? "null"
                                         : param.getResult().getClass().getName()));
                             }
