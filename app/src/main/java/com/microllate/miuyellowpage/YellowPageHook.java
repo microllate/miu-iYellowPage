@@ -57,17 +57,26 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {}
         }
 
-        // Then enumerate already-loaded classes. This catches obfuscated/nested package names.
+        // Catch the real loader when its class is loaded later, without relying on
+        // XposedBridge.getAllLoadedClasses() (not available in this API).
         try {
-            Class<?>[] loaded = XposedBridge.getAllLoadedClasses();
-            for (Class<?> c : loaded) {
-                String n = c.getName().toLowerCase();
-                if (n.contains("yellowpagephoneloader") || n.endsWith(".yellowpagephoneloader")) {
-                    hookLoader(c, c.getName());
-                }
-            }
+            XposedHelpers.findAndHookMethod(ClassLoader.class, "loadClass",
+                    String.class, boolean.class, new XC_MethodHook() {
+                        protected void afterHookedMethod(MethodHookParam p) {
+                            try {
+                                Object result = p.getResult();
+                                if (!(result instanceof Class)) return;
+                                Class<?> loaded = (Class<?>) result;
+                                String n = loaded.getName().toLowerCase();
+                                if (n.contains("yellowpagephoneloader")) {
+                                    hookLoader(loaded, loaded.getName());
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    });
+            XposedBridge.log(TAG + " ClassLoader.loadClass hook installed");
         } catch (Throwable e) {
-            XposedBridge.log(TAG + " class scan failed: " + e);
+            XposedBridge.log(TAG + " ClassLoader hook failed: " + e);
         }
     }
 
