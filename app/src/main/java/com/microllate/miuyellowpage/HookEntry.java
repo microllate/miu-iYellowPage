@@ -285,6 +285,28 @@ public class HookEntry implements IXposedHookLoadPackage {
                         XposedBridge.log(TAG + "CONTACTS proxy candidate: " + name);
                         for (Method m : cls.getDeclaredMethods()) {
                             String mn = m.getName();
+                            if ("g".equals(mn) && m.getParameterTypes().length == 1
+                                    && m.getParameterTypes()[0] == Context.class
+                                    && m.getReturnType() == Boolean.TYPE) {
+                                try {
+                                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                            XposedBridge.log(TAG + "CONTACTS Proxy.g(version gate) ENTER args="
+                                                    + java.util.Arrays.toString(param.args));
+                                        }
+                                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                                            Object old = param.getResult();
+                                            param.setResult(true);
+                                            XposedBridge.log(TAG + "CONTACTS Proxy.g(version gate) "
+                                                    + old + " -> FORCED true");
+                                        }
+                                    });
+                                    XposedBridge.log(TAG + "CONTACTS Proxy.g(version gate) hook installed: " + m);
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "CONTACTS Proxy.g version gate hook failed: " + t);
+                                }
+                            }
+
                             if ("j".equals(mn) || "r".equals(mn) || "q".equals(mn)
                                     || "o".equals(mn) || "p".equals(mn)) {
                                 try {
