@@ -29,10 +29,17 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             for (final Method m : c.getDeclaredMethods()) {
                 String n = m.getName();
                 if (!n.equals("o") && !n.equals("q") && !n.equals("r") && !n.equals("p")
-                        && !n.equals("j") && !n.equals("isYellowPageInstalled")) continue;
+                        && !n.equals("j") && !n.equals("i") && !n.equals("d")
+                        && !n.equals("isYellowPageInstalled")) continue;
+
                 hookOnce(m, new XC_MethodHook() {
                     protected void beforeHookedMethod(MethodHookParam p) {
                         XposedBridge.log(TAG + " YP CALL " + m.toGenericString() + args(p.args));
+                        if (m.getName().equals("j")) {
+                            p.setResult(true);
+                            XposedBridge.log(TAG + " FORCE j -> true");
+                            return;
+                        }
                         stack("YP " + m.getName());
                     }
                     protected void afterHookedMethod(MethodHookParam p) {
@@ -46,7 +53,6 @@ public class YellowPageHook implements IXposedHookLoadPackage {
     }
 
     private static void scanAndHookLoader(final ClassLoader cl) {
-        // First try the known class names.
         String[] known = {
                 "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader",
                 "com.android.contacts.util.YellowPagePhoneLoader",
@@ -58,8 +64,6 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {}
         }
 
-        // Catch the real loader when its class is loaded later, without relying on
-        // XposedBridge.getAllLoadedClasses() (not available in this API).
         try {
             XposedHelpers.findAndHookMethod(ClassLoader.class, "loadClass",
                     String.class, boolean.class, new XC_MethodHook() {
