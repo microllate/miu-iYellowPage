@@ -444,6 +444,55 @@ public class HookEntry implements IXposedHookLoadPackage {
                         }
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             Object result = param.getResult();
+
+                            // EEA provider successfully executes the JOIN query but its
+                            // post-processing can discard the Cursor and return null.
+                            // Recover the already-proven local result for phone lookup items.
+                            if (result == null) {
+                                try {
+                                    android.net.Uri uri = (android.net.Uri) param.args[0];
+                                    if (uri != null && uri.toString().startsWith(
+                                            "content://miui.yellowpage/phone_lookup/")) {
+                                        Context context = (Context) XposedHelpers.callMethod(
+                                                param.thisObject, "getContext");
+                                        Object helper = XposedHelpers.callStaticMethod(
+                                                dbHelperClass, "E", context);
+                                        SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
+                                                helper, "getReadableDatabase");
+                                        String number = uri.getLastPathSegment();
+                                        String normalized = number;
+                                        try {
+                                            Class<?> norm = Class.forName("p022h0.e", false, cl);
+                                            normalized = (String) XposedHelpers.callStaticMethod(
+                                                    norm, "a", context, number);
+                                        } catch (Throwable ignored) {
+                                        }
+                                        String table = "((SELECT yid AS yellowpage_id, photo_url,thumbnail_url,tag,"
+                                                + "yellow_page_name,yellow_page_name_pinyin,tag_pinyin,number,"
+                                                + "normalized_number,min_match,hide,suspect,call_menu,t9_rank,"
+                                                + "atd_category_id,atd_count,atd_provider,flag,slogan,credit_img,"
+                                                + "number_type,provider_id FROM phone_lookup WHERE normalized_number = ?)"
+                                                + " INNER JOIN yellow_page ON yellowpage_id = yid)";
+                                        Cursor recovery = db.query(table, null, null,
+                                                new String[]{normalized}, null, null,
+                                                "update_time desc");
+                                        if (recovery != null && recovery.moveToFirst()) {
+                                            XposedBridge.log(TAG + "Provider recovery: replacing null with "
+                                                    + "direct JOIN Cursor for number=" + number
+                                                    + " normalized=" + normalized
+                                                    + " count=" + recovery.getCount());
+                                            recovery.moveToPosition(-1);
+                                            param.setResult(recovery);
+                                            result = recovery;
+                                        } else if (recovery != null) {
+                                            recovery.close();
+                                        }
+                                    }
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "Provider recovery failed: " + t);
+                                }
+                            }
+
                             if (param.hasThrowable()) {
                                 XposedBridge.log(TAG + "query THREW: "
                                         + android.util.Log.getStackTraceString(param.getThrowable()));
