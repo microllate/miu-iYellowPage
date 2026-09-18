@@ -18,6 +18,42 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "[miu-iYellowPage] ";
 
+    private static void diagnosePhoneLookup(Context context, Class<?> dbHelperClass, ClassLoader cl, String number) {
+        SQLiteDatabase db = null;
+        Cursor c = null;
+        try {
+            Object helper = XposedHelpers.callStaticMethod(dbHelperClass, "E", context);
+            db = (SQLiteDatabase) XposedHelpers.callMethod(helper, "getReadableDatabase");
+            if (db == null) {
+                XposedBridge.log(TAG + "diagnose: readableDatabase=null");
+                return;
+            }
+            c = db.rawQuery("SELECT number, normalized_number, min_match, yid, yellow_page_name FROM phone_lookup WHERE number=? OR normalized_number=? LIMIT 20", new String[]{number, number});
+            int count = c.getCount();
+            XposedBridge.log(TAG + "diagnose: phone_lookup direct match " + number + " count=" + count);
+            while (c.moveToNext()) {
+                XposedBridge.log(TAG + "diagnose row: number=" + c.getString(0)
+                        + " normalized=" + c.getString(1)
+                        + " min_match=" + c.getString(2)
+                        + " yid=" + c.getString(3)
+                        + " name=" + c.getString(4));
+            }
+            c.close(); c = null;
+            c = db.rawQuery("SELECT number, normalized_number, min_match, yid, yellow_page_name FROM phone_lookup LIMIT 5", null);
+            while (c.moveToNext()) {
+                XposedBridge.log(TAG + "diagnose sample: number=" + c.getString(0)
+                        + " normalized=" + c.getString(1)
+                        + " min_match=" + c.getString(2)
+                        + " yid=" + c.getString(3)
+                        + " name=" + c.getString(4));
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "diagnose direct DB failed: " + t);
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
+
     private static void dumpTableCounts(SQLiteDatabase db) {
         String[] tables = {"provider", "yellow_page", "phone_lookup", "t9_lookup"};
         for (String table : tables) {
@@ -294,7 +330,16 @@ public class HookEntry implements IXposedHookLoadPackage {
                     String[].class, String.class, new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
                             XposedBridge.log(TAG + "YellowPageProvider.query() uri="
-                                    + param.args[0] + " selection=" + param.args[2]);
+                                    + param.args[0] + " projection=" + java.util.Arrays.toString((String[]) param.args[1])
+                                    + " selection=" + param.args[2]
+                                    + " args=" + java.util.Arrays.toString((String[]) param.args[3])
+                                    + " sort=" + param.args[4]);
+                            try {
+                                Context context = (Context) XposedHelpers.callMethod(param.thisObject, "getContext");
+                                diagnosePhoneLookup(context, dbHelperClass, cl, "10086");
+                            } catch (Throwable t) {
+                                XposedBridge.log(TAG + "diagnose hook invocation failed: " + t);
+                            }
                         }
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             Object result = param.getResult();
