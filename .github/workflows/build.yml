@@ -31,6 +31,22 @@ jobs:
           status=${PIPESTATUS[0]}
           exit $status
 
+      - name: Verify Xposed entry in APK
+        shell: bash
+        run: |
+          set -e
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          test -n "$APK"
+          ENTRY=$(unzip -p "$APK" assets/xposed_init | tr -d '\\r\\n')
+          echo "xposed_init=$ENTRY"
+          test "$ENTRY" = "com.microllate.miuyellowpage.HookEntry"
+          unzip -p "$APK" classes.dex | strings | grep -q "HookEntry"
+          if unzip -p "$APK" classes.dex | strings | grep -q "YellowPageHook"; then
+            echo "ERROR: legacy YellowPageHook remains in APK"
+            exit 1
+          fi
+          echo "APK verification passed"
+
       - name: Publish build failure to GitHub issue
         if: failure()
         env:
