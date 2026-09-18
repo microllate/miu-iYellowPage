@@ -34,7 +34,7 @@ class HookEntry : IYukiHookXposedInit {
                                 instance.callMethod { name = "k" }
                                 loggerD(msg = "[miu-iYellowPage] k() invoked from phone_lookup")
                             } catch (err: Throwable) {
-                                loggerD(msg = "[miu-iYellowPage] invoke k() failed: \${err.stackTraceToString()}")
+                                loggerD(msg = "[miu-iYellowPage] invoke k() failed: ${err.stackTraceToString()}")
                             }
                         }
                     }
