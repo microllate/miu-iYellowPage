@@ -1,18 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <application
-        android:label="miu-iYellowPage"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <meta-data
-            android:name="xposedmodule"
-            android:value="true" />
-        <meta-data
-            android:name="xposeddescription"
-            android:value="Surgical Yellow Page antispam trigger hook for HyperOS EEA" />
-        <meta-data
-            android:name="xposedminversion"
-            android:value="82" />
+    <application android:allowBackup="false" android:label="miu-iYellowPage" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="HyperOS EEA Yellow Page antispam surgical hook" />
+        <meta-data android:name="xposedminversion" android:value="93" />
     </application>
-
 </manifest>
