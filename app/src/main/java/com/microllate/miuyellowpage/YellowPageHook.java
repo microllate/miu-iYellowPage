@@ -1,6 +1,9 @@
 package com.microllate.miuyellowpage;
 
 import android.content.Context;
+import java.lang.reflect.Method;
+import java.util.HashSet;
+import java.util.Set;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -22,39 +25,43 @@ public class YellowPageHook implements IXposedHookLoadPackage {
 
     private static void hookContactsYellowPage(final ClassLoader cl) {
         try {
-            Class<?> proxy = XposedHelpers.findClass(
+            final Class<?> proxy = XposedHelpers.findClass(
                     "com.android.contacts.util.YellowPageProxy", cl);
 
-            hook(proxy, "isYellowPageInstalled");
-            hook(proxy, "k", Context.class);
-            hook(proxy, "o", Context.class, String.class);
-            hook(proxy, "q", Context.class, String.class);
-            hook(proxy, "r", Context.class, String.class, boolean.class);
+            // Hook by method name only. This avoids guessing parameter ClassLoader/types.
+            final Set<String> targets = new HashSet<>();
+            targets.add("isYellowPageInstalled");
+            targets.add("k");
+            targets.add("o");
+            targets.add("q");
+            targets.add("r");
+            targets.add("p");
 
-            Class<?> customCategory = XposedHelpers.findClass(
-                    "miui.yellowpage.AntispamCustomCategory", cl);
-            hook(proxy, "p", Context.class, String.class, customCategory);
+            int count = 0;
+            for (Method method : proxy.getDeclaredMethods()) {
+                if (!targets.contains(method.getName())) continue;
 
-            XposedBridge.log(TAG + " YellowPageProxy hooks initialized");
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        XposedBridge.log(TAG + " CALL " + method.toGenericString()
+                                + formatArgs(param.args));
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        XposedBridge.log(TAG + " RET  " + method.toGenericString()
+                                + " -> " + safeToString(param.getResult()));
+                    }
+                });
+                count++;
+                XposedBridge.log(TAG + " HOOKED " + method.toGenericString());
+            }
+
+            XposedBridge.log(TAG + " YellowPageProxy hooks initialized, count=" + count);
         } catch (Throwable e) {
             XposedBridge.log(TAG + " YellowPageProxy hook failed: " + e);
         }
-    }
-
-    private static void hook(final Class<?> clazz, final String method, Object... parameterTypes) {
-        XposedHelpers.findAndHookMethod(clazz, method, parameterTypes, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) {
-                XposedBridge.log(TAG + " CALL " + clazz.getName() + "." + method
-                        + formatArgs(param.args));
-            }
-
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) {
-                XposedBridge.log(TAG + " RET  " + clazz.getName() + "." + method
-                        + " -> " + safeToString(param.getResult()));
-            }
-        });
     }
 
     private static String formatArgs(Object[] args) {
