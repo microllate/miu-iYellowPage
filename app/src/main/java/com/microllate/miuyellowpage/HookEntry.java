@@ -229,6 +229,9 @@ public class HookEntry implements IXposedHookLoadPackage {
         // Trace the actual loader creation and its obfuscated load method.
         hookContactsLoader(cl, "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader");
 
+        // Find the actual caller-side classes in this Contacts build without assuming their package.
+        scanContactsYellowPageCallers(lpparam);
+
         // Trace the Contacts-side proxy calls. Do not change any result here.
         try {
             Class<?> proxy = Class.forName("com.android.contacts.util.YellowPageProxy", false, cl);
@@ -268,6 +271,48 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
 
         XposedBridge.log(TAG + "CONTACTS targeted diagnostics installed");
+    }
+
+    private static void scanContactsYellowPageCallers(final XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            DexFile dex = new DexFile(lpparam.appInfo.sourceDir);
+            Enumeration<String> entries = dex.entries();
+            int found = 0;
+            while (entries.hasMoreElements()) {
+                String name = entries.nextElement();
+                String simple = name.substring(name.lastIndexOf('.') + 1);
+                if (!simple.contains("ContactLoaderFragment")
+                        && !simple.contains("QuickContactActivity")) {
+                    continue;
+                }
+                found++;
+                XposedBridge.log(TAG + "CONTACTS caller candidate=" + name);
+                try {
+                    Class<?> cls = Class.forName(name, false, lpparam.classLoader);
+                    for (Method m : cls.getDeclaredMethods()) {
+                        String n = m.getName();
+                        if ("onCreate".equals(n) || "onCreateLoader".equals(n)
+                                || "onLoadFinished".equals(n) || "onLoaderReset".equals(n)
+                                || "load".equals(n) || "loadInBackground".equals(n)
+                                || "J".equals(n) || "r".equals(n)) {
+                            final String methodName = n;
+                            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                    XposedBridge.log(TAG + "CONTACTS caller "
+                                            + methodName + "() in " + param.thisObject.getClass().getName());
+                                }
+                            });
+                        }
+                    }
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + "CONTACTS caller hook failed " + name + ": " + t);
+                }
+            }
+            dex.close();
+            XposedBridge.log(TAG + "CONTACTS caller scan finished found=" + found);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "CONTACTS caller scan failed: " + t);
+        }
     }
 
     private static void hookContactsTarget(final ClassLoader cl, final String className, final String methodName) {
