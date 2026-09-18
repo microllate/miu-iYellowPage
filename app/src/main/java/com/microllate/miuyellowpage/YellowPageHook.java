@@ -23,6 +23,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         hookRuntimeBridge(lp.classLoader);
         scanAndHookLoader(lp.classLoader);
         hookLoaderCallers(lp.classLoader);
+        hookLoaderManager(lp.classLoader);
         hookContentResolver(lp.classLoader);
     }
 
@@ -280,6 +281,31 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                 XposedBridge.log(TAG + " CALLER FAIL " + target[0]
                         + "." + target[1] + ": " + e);
             }
+        }
+    }
+
+    private static void hookLoaderManager(final ClassLoader cl) {
+        try {
+            Class<?> c = XposedHelpers.findClass("androidx.loader.app.LoaderManager", cl);
+            for (final Method m : c.getDeclaredMethods()) {
+                String n = m.getName();
+                if (!n.equals("initLoader") && !n.equals("restartLoader")
+                        && !n.equals("destroyLoader")) continue;
+                hookOnce(m, new XC_MethodHook() {
+                    protected void beforeHookedMethod(MethodHookParam p) {
+                        XposedBridge.log(TAG + " LM CALL " + m.toGenericString()
+                                + args(p.args));
+                        if (!m.getName().equals("destroyLoader")) stack("LM " + m.getName());
+                    }
+                    protected void afterHookedMethod(MethodHookParam p) {
+                        XposedBridge.log(TAG + " LM RET " + m.getName()
+                                + " -> " + safe(p.getResult()));
+                    }
+                });
+            }
+            XposedBridge.log(TAG + " LoaderManager hooks installed");
+        } catch (Throwable e) {
+            XposedBridge.log(TAG + " LoaderManager hook failed: " + e);
         }
     }
 
