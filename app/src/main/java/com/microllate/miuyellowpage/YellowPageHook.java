@@ -21,6 +21,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         XposedBridge.log(TAG + " CONTACTS loaded: " + lp.processName);
         hookProxy(lp.classLoader);
         scanAndHookLoader(lp.classLoader);
+        hookContentResolver(lp.classLoader);
     }
 
     private static void hookProxy(final ClassLoader cl) {
@@ -100,10 +101,10 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             });
             count++;
         }
-        XposedBridge.log(TAG + " LOADER FOUND " + name + " methods=" + count);
+        XposedBridge.log(TAG + " LOADER FOUND " + name + " methods=" + count);\n        for (Method x : c.getDeclaredMethods()) {\n            try { XposedBridge.log(TAG + " LOADER METHOD " + x.toGenericString()); } catch (Throwable ignored) {}\n        }\n        try {\n            for (final java.lang.reflect.Constructor<?> x : c.getDeclaredConstructors()) {\n                hookOnce(x, new XC_MethodHook() {\n                    protected void afterHookedMethod(MethodHookParam p) { XposedBridge.log(TAG + " LOADER NEW " + x.toGenericString()); }\n                });\n            }\n        } catch (Throwable ignored) {}
     }
 
-    private static void hookOnce(final Method m, final XC_MethodHook h) {
+    private static void hookContentResolver(final ClassLoader cl) {\n        try {\n            Class<?> c = XposedHelpers.findClass("android.content.ContentResolver", cl);\n            for (final Method m : c.getDeclaredMethods()) {\n                if (!m.getName().equals("query")) continue;\n                hookOnce(m, new XC_MethodHook() {\n                    protected void beforeHookedMethod(MethodHookParam p) {\n                        String s = args(p.args);\n                        if (s.contains("miui.yellowpage")) {\n                            XposedBridge.log(TAG + " CR QUERY " + m.toGenericString() + s);\n                            stack("CR QUERY");\n                        }\n                    }\n                });\n            }\n            XposedBridge.log(TAG + " ContentResolver.query hook installed");\n        } catch (Throwable e) { XposedBridge.log(TAG + " ContentResolver hook failed: " + e); }\n    }\n\n    private static void hookOnce(final java.lang.reflect.Constructor<?> m, final XC_MethodHook h) {\n        String key = m.toGenericString();\n        if (!HOOKED.add(key)) return;\n        XposedBridge.hookMethod(m, h);\n    }\n\n    private static void hookOnce(final Method m, final XC_MethodHook h) {
         String key = m.toGenericString();
         if (!HOOKED.add(key)) return;
         XposedBridge.hookMethod(m, h);
