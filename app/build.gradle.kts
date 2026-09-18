@@ -3,6 +3,10 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.ksp)
 }
+configurations.all {
+    resolutionStrategy.force("com.github.tiann:FreeReflection:3.2.2")
+}
+
 android {
     namespace = "com.microllate.miuyellowpage"
     compileSdk = 34
