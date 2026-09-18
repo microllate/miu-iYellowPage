@@ -219,42 +219,77 @@ public class HookEntry implements IXposedHookLoadPackage {
      */
     private static void installContactsDiagnostics(final XC_LoadPackage.LoadPackageParam lpparam) {
         final ClassLoader cl = lpparam.classLoader;
-        final String apkPath;
         try {
-            apkPath = lpparam.appInfo.sourceDir;
+            hookContactsClass(cl, "com.android.contacts.activities.UnknownContactActivity");
+            hookContactsClass(cl, "com.android.contacts.fragment.UnknownContactAtyFragment");
+            hookContactsClass(cl, "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader");
+            XposedBridge.log(TAG + "CONTACTS targeted diagnostics installed");
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "Contacts sourceDir failed: " + t);
-            return;
+            XposedBridge.log(TAG + "CONTACTS targeted diagnostics failed: " + t);
         }
+    }
 
+    private static void hookContactsClass(final ClassLoader cl, final String className) {
         try {
-            DexFile dex = new DexFile(apkPath);
-            Enumeration<String> entries = dex.entries();
-            int scanned = 0;
-            int proxyCandidates = 0;
-            int loaderCandidates = 0;
-            int dialerCandidates = 0;
-            int loaderManagerCandidates = 0;
+            Class<?> cls = Class.forName(className, false, cl);
+            XposedBridge.log(TAG + "CONTACTS target=" + className);
 
-            while (entries.hasMoreElements()) {
-                String name = entries.nextElement();
-                scanned++;
-                if (name.indexOf('.') < 0) continue;
+            for (Method m : cls.getDeclaredMethods()) {
+                String mn = m.getName();
 
-                try {
-                    Class<?> cls = Class.forName(name, false, cl);
+                if (("Y0".equals(mn) || "Y2".equals(mn)) && m.getParameterTypes().length == 1
+                        && m.getParameterTypes()[0] == String.class) {
+                    final String methodName = mn;
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "CONTACTS " + className + "." + methodName
+                                    + " number=" + String.valueOf(param.args[0]));
+                        }
+                    });
+                }
 
-                    if (name.contains("YellowPageProxy")) {
-                        proxyCandidates++;
-                        XposedBridge.log(TAG + "CONTACTS proxy candidate: " + name);
-                        for (Method m : cls.getDeclaredMethods()) {
-                            String mn = m.getName();
-                            if ("g".equals(mn) && m.getParameterTypes().length == 1
-                                    && m.getParameterTypes()[0] == Context.class
-                                    && m.getReturnType() == Boolean.TYPE) {
-                                try {
-                                    XposedBridge.hookMethod(m, new XC_MethodHook() {
-                                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                if ("loadInBackground".equals(mn)) {
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader.loadInBackground ENTER");
+                        }
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader.loadInBackground THREW="
+                                        + param.getThrowable());
+                            } else {
+                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader.loadInBackground EXIT result="
+                                        + (param.getResult() == null ? "null" : param.getResult().getClass().getName()));
+                            }
+                        }
+                    });
+                }
+            }
+
+            if (className.endsWith("YellowPagePhoneLoader")) {
+                for (java.lang.reflect.Constructor<?> ctor : cls.getDeclaredConstructors()) {
+                    XposedBridge.hookMethod(ctor, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW args="
+                                    + java.util.Arrays.toString(param.args));
+                        }
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW THREW="
+                                        + param.getThrowable());
+                            } else {
+                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW OK");
+                            }
+                        }
+                    });
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "CONTACTS target hook failed " + className + ": " + t);
+        }
+    }
+
+    @Override protected void beforeHookedMethod(MethodHookParam param) {
                                             XposedBridge.log(TAG + "CONTACTS Proxy.g(version gate) ENTER args="
                                                     + java.util.Arrays.toString(param.args));
                                         }
