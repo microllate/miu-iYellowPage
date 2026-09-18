@@ -31,20 +31,52 @@ jobs:
           status=${PIPESTATUS[0]}
           exit $status
 
-      - name: Verify Xposed entry in APK
+      - name: Verify APK
         shell: bash
         run: |
-          set -e
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          set -euo pipefail
+
+          APK=$(find app/build/outputs/apk/debug -type f -name '*.apk' | head -n 1)
           test -n "$APK"
-          ENTRY=$(unzip -p "$APK" assets/xposed_init | tr -d '\\r\\n')
-          echo "xposed_init=$ENTRY"
+          echo "APK=$APK"
+          echo
+          echo "APK contents:"
+          unzip -l "$APK"
+
+          echo
+          echo "Xposed entry:"
+          unzip -p "$APK" assets/xposed_init | cat -A
+
+          ENTRY=$(unzip -p "$APK" assets/xposed_init | tr -d '\r\n')
           test "$ENTRY" = "com.microllate.miuyellowpage.HookEntry"
-          unzip -p "$APK" classes.dex | strings | grep -q "HookEntry"
-          if unzip -p "$APK" classes.dex | strings | grep -q "YellowPageHook"; then
-            echo "ERROR: legacy YellowPageHook remains in APK"
-            exit 1
-          fi
+
+          echo
+          echo "DEX files:"
+          unzip -Z1 "$APK" 'classes*.dex'
+
+          echo
+          echo "Relevant DEX strings:"
+          for DEX in $(unzip -Z1 "$APK" 'classes*.dex'); do
+            echo "--- $DEX ---"
+            unzip -p "$APK" "$DEX" | strings | grep -E 'HookEntry|YellowPageHook|miu-iYellowPage' || true
+          done
+
+          FOUND_HOOK=0
+          FOUND_LEGACY=0
+          while IFS= read -r DEX; do
+            STRINGS=$(unzip -p "$APK" "$DEX" | strings || true)
+            if printf '%s\n' "$STRINGS" | grep -Fq 'HookEntry'; then
+              FOUND_HOOK=1
+            fi
+            if printf '%s\n' "$STRINGS" | grep -Fq 'YellowPageHook'; then
+              FOUND_LEGACY=1
+            fi
+          done < <(unzip -Z1 "$APK" 'classes*.dex')
+
+          test "$FOUND_HOOK" -eq 1
+          test "$FOUND_LEGACY" -eq 0
+
+          echo
           echo "APK verification passed"
 
       - name: Publish build failure to GitHub issue
@@ -59,8 +91,12 @@ jobs:
             echo "- Commit: ${GITHUB_SHA}"
             echo "- Workflow: ${GITHUB_WORKFLOW}"
             echo
-            echo 'BUILD LOG (last 250 lines):'
-            tail -n 250 build.log
+            echo "### Build log"
+            if [ -f build.log ]; then
+              tail -n 250 build.log
+            else
+              echo "build.log was not created"
+            fi
           } > failure.md
           gh issue create --title "CI build failure: ${GITHUB_SHA::7}" --body-file failure.md
 
@@ -68,11 +104,14 @@ jobs:
         if: always()
         with:
           name: miu-iYellowPage-build-logs
-          path: build.log
+          path: |
+            build.log
+            failure.md
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: always()
         with:
           name: miu-iYellowPage-debug
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
