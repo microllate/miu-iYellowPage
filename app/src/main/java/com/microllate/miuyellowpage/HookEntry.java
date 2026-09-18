@@ -124,8 +124,10 @@ public class HookEntry implements IXposedHookLoadPackage {
                                         XposedBridge.log(TAG + target.getName() + ".l() ENTER");
                                     }
                                     @Override protected void afterHookedMethod(MethodHookParam param) {
+                                        Object old = param.getResult();
+                                        param.setResult(true);
                                         XposedBridge.log(TAG + target.getName() + ".l() EXIT result="
-                                                + param.getResult());
+                                                + old + " -> FORCED true");
                                     }
                                 });
                         XposedBridge.log(TAG + "preset superclass l(Context) hook installed: " + target.getSuperclass().getName());
