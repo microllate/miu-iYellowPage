@@ -57,6 +57,23 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    private static void dumpTableCounts(SQLiteDatabase db) {
+        String[] tables = {"provider", "yellow_page", "phone_lookup", "t9_lookup"};
+        for (String table : tables) {
+            Cursor c = null;
+            try {
+                c = db.rawQuery("SELECT COUNT(*) FROM " + table, null);
+                if (c.moveToFirst()) {
+                    XposedBridge.log(TAG + table + " COUNT=" + c.getInt(0));
+                }
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + table + " COUNT FAILED: " + t);
+            } finally {
+                if (c != null) try { c.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
     private static boolean hasNoArgMethodReturning(Class<?> cls, String name, Class<?> returnType) {
         try {
             Method m = cls.getDeclaredMethod(name);
