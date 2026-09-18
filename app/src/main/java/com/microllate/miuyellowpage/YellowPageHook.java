@@ -225,6 +225,29 @@ public class YellowPageHook implements IXposedHookLoadPackage {
     }
 
     private static void hookLoaderCallers(final ClassLoader cl) {
+        // Trace the real caller-side gate: F4 is observed returning false even when
+        // YellowPageProxy.j() is forced true. Hooking its return lets us verify whether
+        // that false result is the condition preventing YellowPagePhoneLoader creation.
+        try {
+            Class<?> c = XposedHelpers.findClass("com.android.contacts.list.TwelveKeyDialerFragment", cl);
+            for (final Method m : c.getDeclaredMethods()) {
+                if (!m.getName().equals("F4") || m.getReturnType() != boolean.class) continue;
+                hookOnce(m, new XC_MethodHook() {
+                    protected void afterHookedMethod(MethodHookParam p) {
+                        Object r = p.getResult();
+                        if (r instanceof Boolean && !((Boolean) r)) {
+                            XposedBridge.log(TAG + " CALLER F4 RET false -> FORCE true");
+                            p.setResult(true);
+                        }
+                    }
+                });
+            }
+        } catch (Throwable e) {
+            XposedBridge.log(TAG + " F4 gate hook failed: " + e);
+        }
+
+        String[][] targets = {
+
         String[][] targets = {
                 {"com.android.contacts.list.TwelveKeyDialerFragment", "F4"},
                 {"com.android.contacts.dialer.serviceimpl.ContactsServiceImpl", "m"},
