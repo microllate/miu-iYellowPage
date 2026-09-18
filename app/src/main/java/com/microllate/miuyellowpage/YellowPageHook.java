@@ -28,7 +28,6 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             final Class<?> proxy = XposedHelpers.findClass(
                     "com.android.contacts.util.YellowPageProxy", cl);
 
-            // Hook by method name only. This avoids guessing parameter ClassLoader/types.
             final Set<String> targets = new HashSet<>();
             targets.add("isYellowPageInstalled");
             targets.add("k");
@@ -38,7 +37,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             targets.add("p");
 
             int count = 0;
-            for (Method method : proxy.getDeclaredMethods()) {
+            for (final Method method : proxy.getDeclaredMethods()) {
                 if (!targets.contains(method.getName())) continue;
 
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
@@ -46,6 +45,9 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                     protected void beforeHookedMethod(MethodHookParam param) {
                         XposedBridge.log(TAG + " CALL " + method.toGenericString()
                                 + formatArgs(param.args));
+                        if (!"k".equals(method.getName())) {
+                            logStack("CALL " + method.getName());
+                        }
                     }
 
                     @Override
@@ -58,9 +60,61 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                 XposedBridge.log(TAG + " HOOKED " + method.toGenericString());
             }
 
+            // Also hook YellowPagePhoneLoader if present, without assuming its package/class loader.
+            hookLoaderClasses(cl);
+
             XposedBridge.log(TAG + " YellowPageProxy hooks initialized, count=" + count);
         } catch (Throwable e) {
             XposedBridge.log(TAG + " YellowPageProxy hook failed: " + e);
+        }
+    }
+
+    private static void hookLoaderClasses(final ClassLoader cl) {
+        final String[] names = {
+                "com.android.contacts.util.YellowPagePhoneLoader",
+                "com.android.contacts.yellowpage.YellowPagePhoneLoader"
+        };
+
+        for (String name : names) {
+            try {
+                Class<?> c = XposedHelpers.findClass(name, cl);
+                int count = 0;
+                for (final Method m : c.getDeclaredMethods()) {
+                    String n = m.getName().toLowerCase();
+                    if (n.contains("load") || n.contains("phone") || n.contains("yellow")) {
+                        XposedBridge.hookMethod(m, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam p) {
+                                XposedBridge.log(TAG + " LOADER CALL " + m.toGenericString()
+                                        + formatArgs(p.args));
+                                logStack("LOADER " + m.getName());
+                            }
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam p) {
+                                XposedBridge.log(TAG + " LOADER RET  " + m.toGenericString()
+                                        + " -> " + safeToString(p.getResult()));
+                            }
+                        });
+                        count++;
+                    }
+                }
+                XposedBridge.log(TAG + " LOADER HOOKED " + name + " count=" + count);
+            } catch (Throwable ignored) {
+                // Class may not exist in this Contacts build.
+            }
+        }
+    }
+
+    private static void logStack(String label) {
+        try {
+            StackTraceElement[] stack = new Throwable().getStackTrace();
+            StringBuilder sb = new StringBuilder(TAG + " STACK " + label + ":");
+            int limit = Math.min(stack.length, 14);
+            for (int i = 2; i < limit; i++) {
+                sb.append("\n  at ").append(stack[i].toString());
+            }
+            XposedBridge.log(sb.toString());
+        } catch (Throwable ignored) {
         }
     }
 
