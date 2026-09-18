@@ -29,7 +29,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             for (final Method m : c.getDeclaredMethods()) {
                 String n = m.getName();
                 if (!n.equals("o") && !n.equals("q") && !n.equals("r") && !n.equals("p")
-                        && !n.equals("isYellowPageInstalled")) continue;
+                        && !n.equals("j") && !n.equals("isYellowPageInstalled")) continue;
                 hookOnce(m, new XC_MethodHook() {
                     protected void beforeHookedMethod(MethodHookParam p) {
                         XposedBridge.log(TAG + " YP CALL " + m.toGenericString() + args(p.args));
@@ -48,6 +48,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
     private static void scanAndHookLoader(final ClassLoader cl) {
         // First try the known class names.
         String[] known = {
+                "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader",
                 "com.android.contacts.util.YellowPagePhoneLoader",
                 "com.android.contacts.yellowpage.YellowPagePhoneLoader"
         };
