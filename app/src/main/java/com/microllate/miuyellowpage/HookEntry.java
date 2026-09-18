@@ -17,9 +17,18 @@ public class HookEntry implements IXposedHookLoadPackage {
         if (!"com.miui.yellowpage".equals(lpparam.packageName)) return;
 
         try {
-            XposedHelpers.findAndHookMethod(
+            ClassLoader cl = lpparam.classLoader;
+
+            // Resolve the Provider class through the app ClassLoader first.
+            // This avoids the previous XposedHelpers string lookup failure.
+            Class<?> providerClass = Class.forName(
                     "miui.yellowpage.providers.yellowpage.YellowPageProvider",
-                    lpparam.classLoader,
+                    false,
+                    cl
+            );
+
+            XposedHelpers.findAndHookMethod(
+                    providerClass,
                     "onCreate",
                     new XC_MethodHook() {
                         @Override
@@ -30,8 +39,7 @@ public class HookEntry implements IXposedHookLoadPackage {
             );
 
             XposedHelpers.findAndHookMethod(
-                    "miui.yellowpage.providers.yellowpage.YellowPageProvider",
-                    lpparam.classLoader,
+                    providerClass,
                     "query",
                     Uri.class,
                     String[].class,
@@ -53,9 +61,11 @@ public class HookEntry implements IXposedHookLoadPackage {
                     }
             );
 
+            XposedBridge.log(TAG + "Provider class resolved: " + providerClass.getName());
+
             XposedHelpers.findAndHookMethod(
                     "miui.yellowpage.YellowPageUtils",
-                    lpparam.classLoader,
+                    cl,
                     "isYellowPageAvailable",
                     Context.class,
                     new XC_MethodHook() {
