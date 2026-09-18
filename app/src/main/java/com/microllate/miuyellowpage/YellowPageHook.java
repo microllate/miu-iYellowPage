@@ -57,30 +57,44 @@ public class YellowPageHook implements IXposedHookLoadPackage {
     }
 
     private static void hookFairnpCroms(final ClassLoader cl) {
+        // The displayed framework class name is obfuscated/re-written at runtime
+        // (e.g. SilngShost in the stack), so do not resolve android.provider.FairnpCroms
+        // by name. Trace the actual Contacts call sites instead.
+        hookCallerClass(cl, "com.android.contacts.list.TwelveKeyDialerFragment");
+        hookCallerClass(cl, "com.android.contacts.dialer.serviceimpl.ContactsServiceImpl");
+        hookCallerClass(cl, "com.android.contacts.dialer.utils.ContactServiceUtil");
+        hookCallerClass(cl, "com.android.contacts.dialer.list.DialerItemVM");
+        hookCallerClass(cl, "com.android.contacts.dialer.list.VH.DialerCallVH");
+        hookCallerClass(cl, "com.android.contacts.dialer.list.DialerRecyclerAdapter");
+    }
+
+    private static void hookCallerClass(final ClassLoader cl, String name) {
         try {
-            Class<?> c = XposedHelpers.findClass("android.provider.FairnpCroms", cl);
+            Class<?> c = XposedHelpers.findClass(name, cl);
             int count = 0;
             for (final Method m : c.getDeclaredMethods()) {
-                if (!m.getName().equals("j") || m.isSynthetic()) continue;
+                if (m.isSynthetic()) continue;
+                String n = m.getName();
+                // Only trace methods that are known from the captured j() call stacks.
+                if (!n.equals("F4") && !n.equals("m") && !n.equals("y")
+                        && !n.equals("L") && !n.equals("u0") && !n.equals("r0")
+                        && !n.equals("m0") && !n.equals("i0") && !n.equals("t0")
+                        && !n.equals("H0") && !n.equals("C0") && !n.equals("W0")
+                        && !n.equals("I")) continue;
                 hookOnce(m, new XC_MethodHook() {
                     protected void beforeHookedMethod(MethodHookParam p) {
-                        XposedBridge.log(TAG + " FAIRNP CALL " + m.toGenericString() + args(p.args));
-                        stack("FAIRNP j");
+                        XposedBridge.log(TAG + " CALLER " + m.toGenericString() + args(p.args));
+                        stack("CALLER " + m.getName());
                     }
                     protected void afterHookedMethod(MethodHookParam p) {
-                        XposedBridge.log(TAG + " FAIRNP RET " + m.getName() + " -> " + safe(p.getResult()));
+                        XposedBridge.log(TAG + " CALLER RET " + m.getName() + " -> " + safe(p.getResult()));
                     }
                 });
                 count++;
             }
-            XposedBridge.log(TAG + " FAIRNP FOUND methods=" + count);
-            for (Method m : c.getDeclaredMethods()) {
-                if (m.getName().equals("j")) {
-                    XposedBridge.log(TAG + " FAIRNP METHOD " + m.toGenericString());
-                }
-            }
+            XposedBridge.log(TAG + " CALLER FOUND " + name + " methods=" + count);
         } catch (Throwable e) {
-            XposedBridge.log(TAG + " FairnpCroms hook failed: " + e);
+            XposedBridge.log(TAG + " caller hook failed " + name + ": " + e);
         }
     }
 
