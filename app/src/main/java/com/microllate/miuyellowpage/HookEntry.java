@@ -3,6 +3,11 @@ package com.microllate.miuyellowpage;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.app.Application;
+import dalvik.system.DexFile;
+
+import java.lang.reflect.Method;
+import java.util.Enumeration;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -27,6 +32,108 @@ public class HookEntry implements IXposedHookLoadPackage {
             } finally {
                 if (c != null) c.close();
             }
+        }
+    }
+
+    private static boolean hasNoArgMethodReturning(Class<?> cls, String name, Class<?> returnType) {
+        try {
+            Method m = cls.getDeclaredMethod(name);
+            return m.getReturnType() == returnType;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /*
+     * JADX's p052r0.c is R8-obfuscated at runtime. Find the actual class by
+     * its distinctive method shape instead of relying on the JADX-generated name:
+     *   n() -> singleton of same class
+     *   h() -> int resource id
+     *   d()/f()/i() -> String
+     */
+    private static void findAndHookPresetProvider(final ClassLoader cl, final Context context) {
+        try {
+            String apkPath = context.getApplicationInfo().sourceDir;
+            DexFile dex = new DexFile(apkPath);
+            Enumeration<String> entries = dex.entries();
+            int scanned = 0;
+            int candidates = 0;
+
+            while (entries.hasMoreElements()) {
+                String name = entries.nextElement();
+                scanned++;
+
+                // Only inspect classes with the distinctive no-arg method shape.
+                if (name.indexOf('.') < 0) continue;
+
+                try {
+                    Class<?> cls = Class.forName(name, false, cl);
+
+                    if (!hasNoArgMethodReturning(cls, "h", Integer.TYPE)
+                            || !hasNoArgMethodReturning(cls, "d", String.class)
+                            || !hasNoArgMethodReturning(cls, "f", String.class)
+                            || !hasNoArgMethodReturning(cls, "i", String.class)) {
+                        continue;
+                    }
+
+                    Method n;
+                    try {
+                        n = cls.getDeclaredMethod("n");
+                    } catch (Throwable ignored) {
+                        continue;
+                    }
+
+                    if (n.getReturnType() != cls
+                            || !java.lang.reflect.Modifier.isStatic(n.getModifiers())) {
+                        continue;
+                    }
+
+                    candidates++;
+                    XposedBridge.log(TAG + "preset provider candidate: " + cls.getName());
+
+                    final Class<?> target = cls;
+                    XposedHelpers.findAndHookMethod(
+                            target, "h", new XC_MethodHook() {
+                                @Override
+                                protected void afterHookedMethod(MethodHookParam param) {
+                                    try {
+                                        int resId = context.getResources().getIdentifier(
+                                                "yellow_pages_cn",
+                                                "raw",
+                                                "com.miui.yellowpage");
+                                        if (resId != 0) {
+                                            int old = (Integer) param.getResult();
+                                            param.setResult(resId);
+                                            XposedBridge.log(TAG + target.getName()
+                                                    + ".h() " + old + " -> " + resId
+                                                    + " (force yellow_pages_cn)");
+                                        } else {
+                                            XposedBridge.log(TAG
+                                                    + "yellow_pages_cn resource NOT FOUND");
+                                        }
+                                    } catch (Throwable t) {
+                                        XposedBridge.log(TAG + "preset h() failed: " + t);
+                                    }
+                                }
+                            });
+                    XposedBridge.log(TAG + "preset h() hook installed: " + target.getName());
+
+                    // One matching class is expected; stop after the first exact match.
+                    break;
+                } catch (Throwable ignored) {
+                }
+            }
+
+            dex.close();
+
+            XposedBridge.log(TAG + "preset provider scan finished: scanned="
+                    + scanned + " candidates=" + candidates);
+
+            if (candidates == 0) {
+                XposedBridge.log(TAG + "preset provider runtime class NOT FOUND");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "preset provider scan failed: " + t);
         }
     }
 
@@ -61,64 +168,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                 XposedBridge.log(TAG + "enable hook failed: " + t);
             }
 
-            // EEA: p052r0.c.h() returns -1 on international builds.
-            // Force it to expose the APK's bundled yellow_pages_cn resource.
-            try {
-                Class<?> dataProviderClass = Class.forName("p052r0.c", false, cl);
-                XposedHelpers.findAndHookMethod(
-                        dataProviderClass, "h", new XC_MethodHook() {
-                            @Override protected void afterHookedMethod(MethodHookParam param) {
-                                try {
-                                    Context context = lpparam.appInfo != null
-                                            ? null : null;
-                                    int resId = 0;
-                                    try {
-                                        Class<?> appClass = Class.forName(
-                                                "com.miui.yellowpage.YellowPageApplication",
-                                                false, cl);
-                                        Object app = appClass;
-                                    } catch (Throwable ignored) {
-                                    }
-
-                                    // Obtain the package resources through the current
-                                    // Yellow Page package context without depending on
-                                    // an obfuscated Application class.
-                                    try {
-                                        Object activityThread = XposedHelpers.callStaticMethod(
-                                                Class.forName("android.app.ActivityThread", false, null),
-                                                "currentApplication");
-                                        if (activityThread instanceof android.app.Application) {
-                                            context = (Context) activityThread;
-                                        }
-                                    } catch (Throwable ignored) {
-                                    }
-
-                                    if (context != null) {
-                                        resId = context.getResources().getIdentifier(
-                                                "yellow_pages_cn", "raw", "com.miui.yellowpage");
-                                    }
-
-                                    if (resId != 0) {
-                                        int old = (Integer) param.getResult();
-                                        param.setResult(resId);
-                                        XposedBridge.log(TAG +
-                                                "p052r0.c.h() " + old + " -> " + resId +
-                                                " (force yellow_pages_cn)");
-                                    } else {
-                                        XposedBridge.log(TAG +
-                                                "p052r0.c.h(): yellow_pages_cn resource NOT FOUND");
-                                    }
-                                } catch (Throwable t) {
-                                    XposedBridge.log(TAG + "p052r0.c.h() hook failed: " + t);
-                                }
-                            }
-                        });
-                XposedBridge.log(TAG + "p052r0.c.h hook installed");
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + "p052r0.c.h hook failed: " + t);
-            }
-
-            Class<?> dbHelperClass = Class.forName(
+            final Class<?> dbHelperClass = Class.forName(
                     "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
                     false, cl);
 
@@ -133,13 +183,16 @@ public class HookEntry implements IXposedHookLoadPackage {
                     });
             XposedBridge.log(TAG + "DatabaseHelper.L hook installed");
 
-            // N() is the actual preset YellowPage importer.
             XposedHelpers.findAndHookMethod(
                     dbHelperClass, "N", Context.class, SQLiteDatabase.class,
                     new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
                             XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() ENTER");
+
+                            Context context = (Context) param.args[0];
+                            findAndHookPresetProvider(cl, context);
                         }
+
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             SQLiteDatabase db = (SQLiteDatabase) param.args[1];
                             XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() EXIT");
