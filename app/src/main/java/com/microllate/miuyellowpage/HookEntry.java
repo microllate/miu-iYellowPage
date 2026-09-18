@@ -386,6 +386,36 @@ public class HookEntry implements IXposedHookLoadPackage {
                                     XposedBridge.log(TAG + "SQLite.query diagnostic failed: " + t);
                                 }
                             }
+                            @Override protected void afterHookedMethod(MethodHookParam param) {
+                                try {
+                                    String table = (String) param.args[0];
+                                    if (table != null && table.contains("phone_lookup")) {
+                                        Object result = param.getResult();
+                                        if (result instanceof Cursor) {
+                                            Cursor c = (Cursor) result;
+                                            XposedBridge.log(TAG + "SQLite.query PHONE_LOOKUP RESULT"
+                                                    + " count=" + c.getCount()
+                                                    + " columns=" + java.util.Arrays.toString(c.getColumnNames()));
+                                            if (c.moveToFirst()) {
+                                                StringBuilder row = new StringBuilder();
+                                                String[] cols = c.getColumnNames();
+                                                for (int i = 0; i < cols.length; i++) {
+                                                    if (i > 0) row.append(" | ");
+                                                    row.append(cols[i]).append("=").append(c.getString(i));
+                                                }
+                                                XposedBridge.log(TAG + "SQLite.query first row: " + row);
+                                            } else {
+                                                XposedBridge.log(TAG + "SQLite.query RESULT moveToFirst=false");
+                                            }
+                                        } else {
+                                            XposedBridge.log(TAG + "SQLite.query RESULT non-Cursor="
+                                                    + (result == null ? "null" : result.getClass().getName()));
+                                        }
+                                    }
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "SQLite.query result diagnostic failed: " + t);
+                                }
+                            }
                         });
                 XposedBridge.log(TAG + "SQLiteDatabase.query(7 args) diagnostic hook installed");
             } catch (Throwable t) {
