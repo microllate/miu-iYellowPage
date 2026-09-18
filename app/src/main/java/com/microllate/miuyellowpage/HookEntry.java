@@ -362,6 +362,37 @@ public class HookEntry implements IXposedHookLoadPackage {
                         }
                     });
 
+            // Diagnostic: intercept SQLiteDatabase.query() to see the exact SQL inputs used by YellowPageProvider.
+            try {
+                XposedHelpers.findAndHookMethod(
+                        SQLiteDatabase.class, "query",
+                        String.class, String[].class, String.class, String[].class,
+                        String.class, String.class, String.class, String.class,
+                        new XC_MethodHook() {
+                            @Override protected void beforeHookedMethod(MethodHookParam param) {
+                                try {
+                                    String table = (String) param.args[0];
+                                    if (table != null && table.contains("phone_lookup")) {
+                                        XposedBridge.log(TAG + "SQLite.query PHONE_LOOKUP"
+                                                + " table=" + table
+                                                + " columns=" + java.util.Arrays.toString((String[]) param.args[1])
+                                                + " selection=" + param.args[2]
+                                                + " args=" + java.util.Arrays.toString((String[]) param.args[3])
+                                                + " groupBy=" + param.args[4]
+                                                + " having=" + param.args[5]
+                                                + " orderBy=" + param.args[6]
+                                                + " limit=" + param.args[7]);
+                                    }
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "SQLite.query diagnostic failed: " + t);
+                                }
+                            }
+                        });
+                XposedBridge.log(TAG + "SQLiteDatabase.query diagnostic hook installed");
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "SQLiteDatabase.query diagnostic hook failed: " + t);
+            }
+
             XposedHelpers.findAndHookMethod(
                     providerClass, "query",
                     android.net.Uri.class, String[].class, String.class,
