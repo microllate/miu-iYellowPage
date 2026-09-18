@@ -268,12 +268,6 @@ public class YellowPageHook implements IXposedHookLoadPackage {
 
                         protected void afterHookedMethod(MethodHookParam p) {
                             Object result = p.getResult();
-                            if (m.getName().equals("L") && result instanceof Boolean
-                                    && !((Boolean) result)) {
-                                XposedBridge.log(TAG + " CALLER L RET false -> FORCE true");
-                                p.setResult(true);
-                                result = true;
-                            }
                             XposedBridge.log(TAG + " CALLER RET " + m.toGenericString()
                                     + " -> " + safe(result));
                         }
