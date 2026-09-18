@@ -2,6 +2,7 @@ package com.microllate.miuyellowpage;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.app.Application;
 import dalvik.system.DexFile;
@@ -481,9 +482,24 @@ public class HookEntry implements IXposedHookLoadPackage {
                                                     + "direct JOIN Cursor for number=" + number
                                                     + " normalized=" + normalized
                                                     + " count=" + recovery.getCount());
+                                            // Return a standalone MatrixCursor instead of the raw SQLiteCursor.
+                                            // This avoids the EEA provider's URL/post-processing path while
+                                            // preserving the exact columns and values from the proven JOIN row.
+                                            String[] recoveryColumns = recovery.getColumnNames();
+                                            MatrixCursor matrix = new MatrixCursor(recoveryColumns, recovery.getCount());
                                             recovery.moveToPosition(-1);
-                                            param.setResult(recovery);
-                                            result = recovery;
+                                            while (recovery.moveToNext()) {
+                                                Object[] row = new Object[recoveryColumns.length];
+                                                for (int i = 0; i < recoveryColumns.length; i++) {
+                                                    row[i] = recovery.getString(i);
+                                                }
+                                                matrix.addRow(row);
+                                            }
+                                            recovery.close();
+                                            param.setResult(matrix);
+                                            result = matrix;
+                                            XposedBridge.log(TAG + "Provider recovery: returned MatrixCursor columns="
+                                                    + java.util.Arrays.toString(recoveryColumns));
                                         } else if (recovery != null) {
                                             recovery.close();
                                         }
