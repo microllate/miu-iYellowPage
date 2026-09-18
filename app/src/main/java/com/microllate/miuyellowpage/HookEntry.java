@@ -247,9 +247,16 @@ public class HookEntry implements IXposedHookLoadPackage {
                                 XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
                                         + m.getName() + "() THREW=" + param.getThrowable());
                             } else {
-                                XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
-                                        + m.getName() + "() EXIT result="
-                                        + String.valueOf(param.getResult()));
+                                Object result = param.getResult();
+                                if ("j".equals(m.getName())) {
+                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy.j() "
+                                            + String.valueOf(result) + " -> FORCED true");
+                                    param.setResult(true);
+                                } else {
+                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
+                                            + m.getName() + "() EXIT result="
+                                            + String.valueOf(result));
+                                }
                             }
                         }
                     });
