@@ -229,8 +229,15 @@ public class HookEntry implements IXposedHookLoadPackage {
                         }
 
                         @Override protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() THREW: "
+                                        + param.getThrowable());
+                                XposedBridge.log(TAG + "N() throwable stack: "
+                                        + android.util.Log.getStackTraceString(param.getThrowable()));
+                            } else {
+                                XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() EXIT normally");
+                            }
                             SQLiteDatabase db = (SQLiteDatabase) param.args[1];
-                            XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() EXIT");
                             dumpTableCounts(db);
                         }
                     });
@@ -259,6 +266,18 @@ public class HookEntry implements IXposedHookLoadPackage {
                                 XposedBridge.log(TAG + "forced Provider data import finished");
 
                                 XposedBridge.log(TAG + "forcing preset Yellow Page import via N()");
+                                try {
+                                    Object preset = XposedHelpers.callStaticMethod(
+                                            Class.forName("r0.c", false, cl), "n");
+                                    Object presetPath = XposedHelpers.callMethod(preset, "c", context);
+                                    java.io.File pf = new java.io.File(String.valueOf(presetPath));
+                                    XposedBridge.log(TAG + "preset file path=" + pf.getAbsolutePath()
+                                            + " exists=" + pf.exists()
+                                            + " length=" + (pf.exists() ? pf.length() : -1)
+                                            + " parentExists=" + (pf.getParentFile() != null && pf.getParentFile().exists()));
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "preset file precheck failed: " + t);
+                                }
                                 XposedHelpers.callMethod(helper, "N", context, db);
                                 XposedBridge.log(TAG + "forced preset Yellow Page import finished");
 
