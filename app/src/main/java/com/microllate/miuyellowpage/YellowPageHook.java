@@ -101,10 +101,45 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             });
             count++;
         }
-        XposedBridge.log(TAG + " LOADER FOUND " + name + " methods=" + count);\n        for (Method x : c.getDeclaredMethods()) {\n            try { XposedBridge.log(TAG + " LOADER METHOD " + x.toGenericString()); } catch (Throwable ignored) {}\n        }\n        try {\n            for (final java.lang.reflect.Constructor<?> x : c.getDeclaredConstructors()) {\n                hookOnce(x, new XC_MethodHook() {\n                    protected void afterHookedMethod(MethodHookParam p) { XposedBridge.log(TAG + " LOADER NEW " + x.toGenericString()); }\n                });\n            }\n        } catch (Throwable ignored) {}
+        XposedBridge.log(TAG + " LOADER FOUND " + name + " methods=" + count);
+        for (Method x : c.getDeclaredMethods()) {
+            try { XposedBridge.log(TAG + " LOADER METHOD " + x.toGenericString()); } catch (Throwable ignored) {}
+        }
+        try {
+            for (final java.lang.reflect.Constructor<?> x : c.getDeclaredConstructors()) {
+                hookOnce(x, new XC_MethodHook() {
+                    protected void afterHookedMethod(MethodHookParam p) { XposedBridge.log(TAG + " LOADER NEW " + x.toGenericString()); }
+                });
+            }
+        } catch (Throwable ignored) {}
     }
 
-    private static void hookContentResolver(final ClassLoader cl) {\n        try {\n            Class<?> c = XposedHelpers.findClass("android.content.ContentResolver", cl);\n            for (final Method m : c.getDeclaredMethods()) {\n                if (!m.getName().equals("query")) continue;\n                hookOnce(m, new XC_MethodHook() {\n                    protected void beforeHookedMethod(MethodHookParam p) {\n                        String s = args(p.args);\n                        if (s.contains("miui.yellowpage")) {\n                            XposedBridge.log(TAG + " CR QUERY " + m.toGenericString() + s);\n                            stack("CR QUERY");\n                        }\n                    }\n                });\n            }\n            XposedBridge.log(TAG + " ContentResolver.query hook installed");\n        } catch (Throwable e) { XposedBridge.log(TAG + " ContentResolver hook failed: " + e); }\n    }\n\n    private static void hookOnce(final java.lang.reflect.Constructor<?> m, final XC_MethodHook h) {\n        String key = m.toGenericString();\n        if (!HOOKED.add(key)) return;\n        XposedBridge.hookMethod(m, h);\n    }\n\n    private static void hookOnce(final Method m, final XC_MethodHook h) {
+    private static void hookContentResolver(final ClassLoader cl) {
+        try {
+            Class<?> c = XposedHelpers.findClass("android.content.ContentResolver", cl);
+            for (final Method m : c.getDeclaredMethods()) {
+                if (!m.getName().equals("query")) continue;
+                hookOnce(m, new XC_MethodHook() {
+                    protected void beforeHookedMethod(MethodHookParam p) {
+                        String s = args(p.args);
+                        if (s.contains("miui.yellowpage")) {
+                            XposedBridge.log(TAG + " CR QUERY " + m.toGenericString() + s);
+                            stack("CR QUERY");
+                        }
+                    }
+                });
+            }
+            XposedBridge.log(TAG + " ContentResolver.query hook installed");
+        } catch (Throwable e) { XposedBridge.log(TAG + " ContentResolver hook failed: " + e); }
+    }
+
+    private static void hookOnce(final java.lang.reflect.Constructor<?> m, final XC_MethodHook h) {
+        String key = m.toGenericString();
+        if (!HOOKED.add(key)) return;
+        XposedBridge.hookMethod(m, h);
+    }
+
+    private static void hookOnce(final Method m, final XC_MethodHook h) {
         String key = m.toGenericString();
         if (!HOOKED.add(key)) return;
         XposedBridge.hookMethod(m, h);
@@ -115,7 +150,8 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             StackTraceElement[] s = new Throwable().getStackTrace();
             StringBuilder b = new StringBuilder(TAG + " STACK " + label);
             for (int i = 2; i < Math.min(s.length, 12); i++) {
-                b.append("\n  at ").append(s[i]);
+                b.append("
+  at ").append(s[i]);
             }
             XposedBridge.log(b.toString());
         } catch (Throwable ignored) {}
