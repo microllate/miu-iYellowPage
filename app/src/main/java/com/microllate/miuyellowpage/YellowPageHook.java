@@ -247,8 +247,6 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         }
 
         String[][] targets = {
-
-        String[][] targets = {
                 {"com.android.contacts.list.TwelveKeyDialerFragment", "F4"},
                 {"com.android.contacts.dialer.serviceimpl.ContactsServiceImpl", "m"},
                 {"com.android.contacts.dialer.utils.ContactServiceUtil", "y"},
