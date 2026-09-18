@@ -6,10 +6,11 @@ import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
+import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class HookEntry implements IXposedHookLoadPackage {
     @Override
-    public void handleLoadPackage(final IXposedHookLoadPackage.LoadPackageParam lpparam) {
+    public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) {
         if (!"com.miui.yellowpage".equals(lpparam.packageName)) return;
 
         try {
