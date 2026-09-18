@@ -48,8 +48,10 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                         // EEA YellowPageUtils reports the service as unavailable even though
                         // MIUIContactsT and the EEA YellowPage provider are both present.
                         // i() is the actual gate used by YellowPagePhoneLoader.j().
-                        if (m.getName().equals("i") && result instanceof Boolean && !((Boolean) result)) {
-                            XposedBridge.log(TAG + " YP i RET false -> FORCE true (EEA compatibility gate)");
+                        if ((m.getName().equals("i") || m.getName().equals("d"))
+                                && result instanceof Boolean && !((Boolean) result)) {
+                            XposedBridge.log(TAG + " YP " + m.getName()
+                                    + " RET false -> FORCE true (EEA compatibility gate)");
                             p.setResult(true);
                             result = true;
                         }
