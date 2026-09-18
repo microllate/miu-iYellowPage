@@ -129,6 +129,16 @@ public class HookEntry implements IXposedHookLoadPackage {
                             } else {
                                 XposedBridge.log(TAG + "query returned non-Cursor="
                                         + (result == null ? "null" : result.getClass().getName()));
+                                if (result == null) {
+                                    try {
+                                        XposedBridge.log(TAG + "NULL query stack:");
+                                        for (StackTraceElement e : Thread.currentThread().getStackTrace()) {
+                                            XposedBridge.log(TAG + "  at " + e.toString());
+                                        }
+                                    } catch (Throwable t) {
+                                        XposedBridge.log(TAG + "stack trace failed: " + t);
+                                    }
+                                }
                             }
                         }
                     }
