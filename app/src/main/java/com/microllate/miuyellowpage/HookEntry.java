@@ -229,8 +229,12 @@ public class HookEntry implements IXposedHookLoadPackage {
         // Trace the actual loader creation and its obfuscated load method.
         hookContactsLoader(cl, "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader");
 
-        // Find the actual caller-side classes in this Contacts build without assuming their package.
-        scanContactsYellowPageCallers(lpparam);
+        // Exact caller chain from the supplied decompiled Contacts source.
+        hookContactsMethod(cl, "com.android.contacts.detail.ContactLoaderFragment$3", "X");
+        hookContactsMethod(cl, "com.android.contacts.detail.ContactLoaderFragment$YellowPageLoader", "run");
+        hookContactsMethod(cl, "com.android.contacts.activities.UnknownContactActivity$AnonymousClass2", "b0");
+        hookContactsMethod(cl, "com.android.contacts.fragment.UnknownContactAtyFragment$AnonymousClass5", "b0");
+        XposedBridge.log(TAG + "CONTACTS exact Yellow Page caller hooks installed");
 
         // Trace the Contacts-side proxy calls. Do not change any result here.
         try {
@@ -271,6 +275,37 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
 
         XposedBridge.log(TAG + "CONTACTS targeted diagnostics installed");
+    }
+
+    private static void hookContactsMethod(final ClassLoader cl, final String className, final String methodName) {
+        try {
+            Class<?> cls = Class.forName(className, false, cl);
+            int count = 0;
+            for (Method m : cls.getDeclaredMethods()) {
+                if (!methodName.equals(m.getName())) continue;
+                count++;
+                final Method target = m;
+                XposedBridge.hookMethod(target, new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                        XposedBridge.log(TAG + "CONTACTS EXACT " + className + "." + methodName
+                                + "() ENTER args=" + java.util.Arrays.toString(param.args));
+                    }
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            XposedBridge.log(TAG + "CONTACTS EXACT " + className + "." + methodName
+                                    + "() THREW=" + param.getThrowable());
+                        } else {
+                            XposedBridge.log(TAG + "CONTACTS EXACT " + className + "." + methodName
+                                    + "() EXIT result=" + String.valueOf(param.getResult()));
+                        }
+                    }
+                });
+            }
+            XposedBridge.log(TAG + "CONTACTS EXACT hook " + className + "." + methodName
+                    + " installed methods=" + count);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "CONTACTS EXACT hook FAILED " + className + "." + methodName + ": " + t);
+        }
     }
 
     private static void scanContactsYellowPageCallers(final XC_LoadPackage.LoadPackageParam lpparam) {
