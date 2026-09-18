@@ -298,11 +298,24 @@ public class HookEntry implements IXposedHookLoadPackage {
                         }
                         @Override protected void afterHookedMethod(MethodHookParam param) {
                             Object result = param.getResult();
+                            if (param.hasThrowable()) {
+                                XposedBridge.log(TAG + "query THREW: "
+                                        + android.util.Log.getStackTraceString(param.getThrowable()));
+                            }
                             if (result instanceof Cursor) {
                                 Cursor cursor = (Cursor) result;
                                 try {
                                     XposedBridge.log(TAG + "query cursor count=" + cursor.getCount()
                                             + " columns=" + java.util.Arrays.toString(cursor.getColumnNames()));
+                                    if (cursor.moveToFirst()) {
+                                        StringBuilder row = new StringBuilder();
+                                        String[] cols = cursor.getColumnNames();
+                                        for (int i = 0; i < cols.length; i++) {
+                                            if (i > 0) row.append(" | ");
+                                            row.append(cols[i]).append("=").append(cursor.getString(i));
+                                        }
+                                        XposedBridge.log(TAG + "query first row: " + row);
+                                    }
                                 } catch (Throwable t) {
                                     XposedBridge.log(TAG + "cursor inspect failed: " + t);
                                 }
