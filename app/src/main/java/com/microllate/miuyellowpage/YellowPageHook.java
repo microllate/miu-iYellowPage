@@ -38,6 +38,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                         XposedBridge.log(TAG + " YP CALL " + m.toGenericString() + args(p.args));
                         if (m.getName().equals("j")) {
                             p.setResult(true);
+                            stack("YP j");
                             XposedBridge.log(TAG + " FORCE j -> true");
                             return;
                         }
