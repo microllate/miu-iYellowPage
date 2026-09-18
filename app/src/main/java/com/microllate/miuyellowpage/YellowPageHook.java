@@ -21,10 +21,13 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         if (!CONTACTS.equals(lp.packageName)) return;
         XposedBridge.log(TAG + " CONTACTS loaded: " + lp.processName);
         hookProxy(lp.classLoader);
-        hookFairnpCroms(lp.classLoader);
+        hookRuntimeBridge(lp.classLoader);
         scanAndHookLoader(lp.classLoader);
         hookContentResolver(lp.classLoader);
     }
+
+    private static int jLogCount = 0;
+    private static final Set<String> J_CALLERS = new HashSet<>();
 
     private static void hookProxy(final ClassLoader cl) {
         try {
@@ -37,64 +40,77 @@ public class YellowPageHook implements IXposedHookLoadPackage {
 
                 hookOnce(m, new XC_MethodHook() {
                     protected void beforeHookedMethod(MethodHookParam p) {
-                        XposedBridge.log(TAG + " YP CALL " + m.toGenericString() + args(p.args));
                         if (m.getName().equals("j")) {
-                            stack("YP j");
+                            traceJCaller();
                             p.setResult(true);
-                            XposedBridge.log(TAG + " FORCE j -> true");
-                            return;
                         }
-                        stack("YP " + m.getName());
                     }
                     protected void afterHookedMethod(MethodHookParam p) {
-                        XposedBridge.log(TAG + " YP RET " + m.getName() + " -> " + safe(p.getResult()));
+                        String n = m.getName();
+                        if (!n.equals("j") && jLogCount < 20) {
+                            XposedBridge.log(TAG + " YP " + n + " -> " + safe(p.getResult()));
+                        }
                     }
                 });
             }
+            XposedBridge.log(TAG + " proxy hooks installed");
         } catch (Throwable e) {
             XposedBridge.log(TAG + " proxy scan failed: " + e);
         }
     }
 
-    private static void hookFairnpCroms(final ClassLoader cl) {
-        // The displayed framework class name is obfuscated/re-written at runtime
-        // (e.g. SilngShost in the stack), so do not resolve android.provider.FairnpCroms
-        // by name. Trace the actual Contacts call sites instead.
-        hookCallerClass(cl, "com.android.contacts.list.TwelveKeyDialerFragment");
-        hookCallerClass(cl, "com.android.contacts.dialer.serviceimpl.ContactsServiceImpl");
-        hookCallerClass(cl, "com.android.contacts.dialer.utils.ContactServiceUtil");
-        hookCallerClass(cl, "com.android.contacts.dialer.list.DialerItemVM");
-        hookCallerClass(cl, "com.android.contacts.dialer.list.VH.DialerCallVH");
-        hookCallerClass(cl, "com.android.contacts.dialer.list.DialerRecyclerAdapter");
+    private static void traceJCaller() {
+        if (jLogCount >= 30) return;
+        try {
+            StackTraceElement[] s = new Throwable().getStackTrace();
+            String caller = null;
+            for (int i = 2; i < s.length; i++) {
+                String n = s[i].getClassName();
+                if (!n.contains("com.microllate.miuyellowpage")
+                        && !n.contains("de.robv.android.xposed")
+                        && !n.contains("BBrJw.")
+                        && !n.equals("r") && !n.equals("k")) {
+                    caller = s[i].toString();
+                    break;
+                }
+            }
+            if (caller != null && J_CALLERS.add(caller)) {
+                jLogCount++;
+                XposedBridge.log(TAG + " J_CALLER[" + jLogCount + "] " + caller);
+            }
+        } catch (Throwable ignored) {}
     }
 
-    private static void hookCallerClass(final ClassLoader cl, String name) {
+    // The stack showed an obfuscated runtime bridge named android.hardware.SilngShost.
+    // Try the actual runtime name once; if unavailable, continue without noisy errors.
+    private static void hookRuntimeBridge(final ClassLoader cl) {
         try {
-            Class<?> c = XposedHelpers.findClass(name, cl);
+            Class<?> c;
+            try {
+                c = Class.forName("android.hardware.SilngShost", false, cl);
+            } catch (Throwable e) {
+                c = Class.forName("android.hardware.SilngShost", false, ClassLoader.getSystemClassLoader());
+            }
             int count = 0;
             for (final Method m : c.getDeclaredMethods()) {
-                if (m.isSynthetic()) continue;
-                String n = m.getName();
-                // Only trace methods that are known from the captured j() call stacks.
-                if (!n.equals("F4") && !n.equals("m") && !n.equals("y")
-                        && !n.equals("L") && !n.equals("u0") && !n.equals("r0")
-                        && !n.equals("m0") && !n.equals("i0") && !n.equals("t0")
-                        && !n.equals("H0") && !n.equals("C0") && !n.equals("W0")
-                        && !n.equals("I")) continue;
+                if (!m.getName().equals("j")) continue;
                 hookOnce(m, new XC_MethodHook() {
                     protected void beforeHookedMethod(MethodHookParam p) {
-                        XposedBridge.log(TAG + " CALLER " + m.toGenericString() + args(p.args));
-                        stack("CALLER " + m.getName());
+                        if (jLogCount < 30) {
+                            XposedBridge.log(TAG + " BRIDGE j " + m.toGenericString());
+                        }
                     }
                     protected void afterHookedMethod(MethodHookParam p) {
-                        XposedBridge.log(TAG + " CALLER RET " + m.getName() + " -> " + safe(p.getResult()));
+                        if (jLogCount < 30) {
+                            XposedBridge.log(TAG + " BRIDGE j RET -> " + safe(p.getResult()));
+                        }
                     }
                 });
                 count++;
             }
-            XposedBridge.log(TAG + " CALLER FOUND " + name + " methods=" + count);
+            XposedBridge.log(TAG + " RUNTIME BRIDGE methods=" + count);
         } catch (Throwable e) {
-            XposedBridge.log(TAG + " caller hook failed " + name + ": " + e);
+            XposedBridge.log(TAG + " runtime bridge unavailable");
         }
     }
 
@@ -147,9 +163,6 @@ public class YellowPageHook implements IXposedHookLoadPackage {
             count++;
         }
         XposedBridge.log(TAG + " LOADER FOUND " + name + " methods=" + count);
-        for (Method x : c.getDeclaredMethods()) {
-            try { XposedBridge.log(TAG + " LOADER METHOD " + x.toGenericString()); } catch (Throwable ignored) {}
-        }
         try {
             for (final Constructor<?> x : c.getDeclaredConstructors()) {
                 hookOnce(x, new XC_MethodHook() {
@@ -192,17 +205,6 @@ public class YellowPageHook implements IXposedHookLoadPackage {
         String key = m.toGenericString();
         if (!HOOKED.add(key)) return;
         XposedBridge.hookMethod(m, h);
-    }
-
-    private static void stack(String label) {
-        try {
-            StackTraceElement[] s = new Throwable().getStackTrace();
-            StringBuilder b = new StringBuilder(TAG + " STACK " + label);
-            for (int i = 2; i < Math.min(s.length, 14); i++) {
-                b.append("\n  at ").append(s[i]);
-            }
-            XposedBridge.log(b.toString());
-        } catch (Throwable ignored) {}
     }
 
     private static String args(Object[] a) {
