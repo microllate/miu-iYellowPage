@@ -45,9 +45,6 @@ public class YellowPageHook implements IXposedHookLoadPackage {
 
                     protected void afterHookedMethod(MethodHookParam p) {
                         Object result = p.getResult();
-                        // EEA YellowPageUtils reports the service as unavailable even though
-                        // MIUIContactsT and the EEA YellowPage provider are both present.
-                        // i() is the actual gate used by YellowPagePhoneLoader.j().
                         if ((m.getName().equals("i") || m.getName().equals("d"))
                                 && result instanceof Boolean && !((Boolean) result)) {
                             XposedBridge.log(TAG + " YP " + m.getName()
@@ -55,7 +52,12 @@ public class YellowPageHook implements IXposedHookLoadPackage {
                             p.setResult(true);
                             result = true;
                         }
-                        XposedBridge.log(TAG + " YP " + m.getName() + " RET " + safe(result));
+                        // Keep j return visible, but do not spam every successful call.
+                        if (m.getName().equals("j")) {
+                            XposedBridge.log(TAG + " YP j RET " + safe(result));
+                        } else if (m.getName().equals("i") || m.getName().equals("d")) {
+                            XposedBridge.log(TAG + " YP " + m.getName() + " RET " + safe(result));
+                        }
                     }
                 });
             }
@@ -69,7 +71,7 @@ public class YellowPageHook implements IXposedHookLoadPackage {
 
     private static void traceJCaller() {
         int count = jTraceCount.incrementAndGet();
-        if (count > 20) return;
+        if (count > 3) return;
         try {
             StackTraceElement[] s = new Throwable().getStackTrace();
             XposedBridge.log(TAG + " J_CALLER #" + count);
