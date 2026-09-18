@@ -1,6 +1,7 @@
 package com.microllate.miuyellowpage;
 
 import android.content.Context;
+import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -94,8 +95,28 @@ public class HookEntry implements IXposedHookLoadPackage {
 
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "YellowPageProvider.query() returned="
-                                    + (param.getResult() != null));
+                            Object result = param.getResult();
+                            if (result instanceof Cursor) {
+                                Cursor cursor = (Cursor) result;
+                                try {
+                                    XposedBridge.log(TAG + "query cursor count=" + cursor.getCount()
+                                            + " columns=" + java.util.Arrays.toString(cursor.getColumnNames()));
+                                    if (cursor.moveToFirst()) {
+                                        StringBuilder row = new StringBuilder();
+                                        for (int i = 0; i < cursor.getColumnCount(); i++) {
+                                            if (i > 0) row.append(" | ");
+                                            row.append(cursor.getColumnName(i)).append("=")
+                                                    .append(cursor.getString(i));
+                                        }
+                                        XposedBridge.log(TAG + "query first row=" + row);
+                                    }
+                                } catch (Throwable t) {
+                                    XposedBridge.log(TAG + "cursor inspect failed: " + t);
+                                }
+                            } else {
+                                XposedBridge.log(TAG + "query returned non-Cursor="
+                                        + (result == null ? "null" : result.getClass().getName()));
+                            }
                         }
                     }
             );
