@@ -359,6 +359,66 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+    private static void hookYellowPagePullDecision(ClassLoader cl) {
+        try {
+            Class<?> cls = Class.forName("o0.g", false, cl);
+            int found = 0;
+            for (Method method : cls.getDeclaredMethods()) {
+                if (!"y".equals(method.getName())
+                        || method.getReturnType() != Boolean.TYPE
+                        || method.getParameterTypes().length != 1
+                        || method.getParameterTypes()[0] != Context.class) {
+                    continue;
+                }
+                final Method target = method;
+                XposedBridge.hookMethod(target, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("PULL DECISION ENTER: o0.g.y(Context)");
+                        try {
+                            StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+                            StringBuilder out = new StringBuilder("PULL DECISION STACK:");
+                            int n = 0;
+                            for (StackTraceElement e : trace) {
+                                String s = String.valueOf(e);
+                                if (s.contains("HookEntry")) continue;
+                                out.append(" | ").append(s);
+                                if (++n >= 14) break;
+                            }
+                            log(out.toString());
+                        } catch (Throwable ignored) {
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            log("PULL DECISION THROW: "
+                                    + param.getThrowable().getClass().getName() + ": "
+                                    + String.valueOf(param.getThrowable().getMessage()));
+                            return;
+                        }
+                        Object result = param.getResult();
+                        log("PULL DECISION RESULT: original=" + String.valueOf(result));
+                        if (Boolean.FALSE.equals(result)) {
+                            // This is intentionally diagnostic: allow the real pull
+                            // pipeline to continue so later hooks can reveal which
+                            // stage actually prevents the sync/download.
+                            param.setResult(true);
+                            log("PULL DECISION BYPASS: false -> true");
+                        }
+                    }
+                });
+                found++;
+                log("PULL DECISION HOOKED: " + target.toGenericString());
+            }
+            log("PULL DECISION HOOK COUNT=" + found);
+        } catch (Throwable e) {
+            log("PULL DECISION HOOK FAILED: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookPullTaskExecution(ClassLoader cl) {
         try {
             Class<?> cls = Class.forName("o0.g", false, cl);
@@ -3352,6 +3412,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                     param.thisObject, "getContext");
                             log("YellowPageProvider.onCreate");
                             hookYellowPagePullTask(cl, context);
+                            hookYellowPagePullDecision(cl);
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
                             hookYellowPageHttpDecision(cl);
