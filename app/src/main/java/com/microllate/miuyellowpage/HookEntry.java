@@ -1447,6 +1447,59 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         log("CRITICAL GATES INSTALL END");
     }
 
+    private static void hookYellowPageRequestMode(ClassLoader cl) {
+        try {
+            Class<?> taskBase = Class.forName("o0.a", false, cl);
+            Method factory = taskBase.getDeclaredMethod("j", Context.class);
+            XposedBridge.hookMethod(factory, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.hasThrowable() || param.getResult() == null) {
+                        return;
+                    }
+                    Object result = param.getResult();
+                    if (!"com.miui.yellowpage.utils.H".equals(result.getClass().getName())
+                            && !isInstanceOf(result, "com.miui.yellowpage.utils.H", cl)) {
+                        return;
+                    }
+
+                    try {
+                        Class<?> j0 = Class.forName(
+                                "com.miui.yellowpage.utils.j0", false, cl);
+                        java.lang.reflect.Field k = j0.getDeclaredField("k");
+                        k.setAccessible(true);
+                        Object old = k.get(result);
+                        log("REQUEST MODE: o0.a.j(Context) returned H k=" + String.valueOf(old));
+
+                        if (Integer.valueOf(-1).equals(old)) {
+                            Method setter = j0.getDeclaredMethod("j", Integer.TYPE);
+                            setter.setAccessible(true);
+                            setter.invoke(result, 1);
+                            log("REQUEST MODE: forced H.k -1 -> 1");
+                        }
+                    } catch (Throwable e) {
+                        log("REQUEST MODE: force failed: "
+                                + e.getClass().getName() + ": "
+                                + String.valueOf(e.getMessage()));
+                    }
+                }
+            });
+            log("hooked REQUEST MODE: o0.a.j(Context) -> H");
+        } catch (Throwable e) {
+            log("REQUEST MODE hook failed: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
+    private static boolean isInstanceOf(Object value, String className, ClassLoader cl) {
+        try {
+            Class<?> target = Class.forName(className, false, cl);
+            return target.isInstance(value);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private static void hookYellowPageNetworkGates(ClassLoader cl) {
         // H.u() has a concrete gate sequence in the EEA APK:
         //   j0.k -> Permission.networkingAllowed(j0.i) -> X.k(j0.i) -> j0.d()
@@ -2184,6 +2237,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         try {
             ClassLoader cl = lpparam.classLoader;
             log("YELLOWPAGE LOAD ENTER classLoader=" + String.valueOf(cl));
+            hookYellowPageRequestMode(cl);
             try {
                 log("CRITICAL CALL BEFORE");
                 hookCriticalYellowPageGates(cl);
