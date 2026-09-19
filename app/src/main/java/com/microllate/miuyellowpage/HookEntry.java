@@ -113,6 +113,32 @@ public class HookEntry implements IXposedHookLoadPackage {
     }
 
 
+    private static void hookYellowPageDataCommitGate(ClassLoader cl) {
+        try {
+            Class<?> cls = Class.forName("o0.g", false, cl);
+            for (Method method : cls.getDeclaredMethods()) {
+                Class<?>[] p = method.getParameterTypes();
+                if (!"t".equals(method.getName())
+                        || method.getReturnType() != Boolean.TYPE
+                        || p.length != 2
+                        || p[0] != Context.class
+                        || p[1] != String.class) continue;
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (!param.hasThrowable() && Boolean.FALSE.equals(param.getResult())) {
+                            param.setResult(true);
+                        }
+                    }
+                });
+                log("Data commit gate hooked: o0.g.t(Context,String)");
+                return;
+            }
+        } catch (Throwable e) {
+            log("Data commit gate hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookJobDispatcher(ClassLoader cl, Context context) {
         try {
             Class<?> dispatcher = null;
@@ -3305,6 +3331,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                                     param.thisObject, "getContext");
                             log("YellowPageProvider.onCreate");
                             hookYellowPagePullTask(cl, context);
+                            hookYellowPageDataCommitGate(cl);
                             hookYellowPageJobServices(cl, context);
                             hookYellowPageNetworkGates(cl);
                             hookYellowPageStreamUtility(cl);
