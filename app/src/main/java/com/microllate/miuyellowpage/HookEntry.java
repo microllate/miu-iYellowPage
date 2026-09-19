@@ -499,6 +499,77 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookYellowPageHttpDecision(ClassLoader cl) {
+        try {
+            Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
+            final String[] targets = new String[] {
+                    "https://api.comm.miui.com/cspmisc/patch/info",
+                    "https://global.api.huangye.miui.com/spbook/yellowpage/provider/info"
+            };
+
+            for (Method method : http.getDeclaredMethods()) {
+                Class<?>[] p = method.getParameterTypes();
+
+                if ("z".equals(method.getName())
+                        && method.getReturnType() == Boolean.TYPE
+                        && p.length == 1
+                        && p[0] == String.class) {
+                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            String url = (String) param.args[0];
+                            Object original = param.getResult();
+                            boolean target = false;
+                            for (String item : targets) {
+                                if (item.equals(url)) {
+                                    target = true;
+                                    break;
+                                }
+                            }
+                            if (target) {
+                                log("HTTP decision z: " + url + " original=" + original + " -> true");
+                                param.setResult(true);
+                            } else {
+                                log("HTTP decision z: " + url + " original=" + original);
+                            }
+                        }
+                    });
+                    log("hooked YellowPage HTTP decision: H.z(String)");
+                }
+
+                if ("B".equals(method.getName())
+                        && p.length == 2
+                        && p[0] == String.class
+                        && p[1] == Boolean.TYPE) {
+                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            log("HTTP request B ENTER: url=" + String.valueOf(param.args[0])
+                                    + " flag=" + String.valueOf(param.args[1]));
+                        }
+
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                Throwable t = param.getThrowable();
+                                log("HTTP request B THROW: " + t.getClass().getName()
+                                        + ": " + String.valueOf(t.getMessage()));
+                            } else {
+                                Object result = param.getResult();
+                                log("HTTP request B RESULT: " + String.valueOf(result)
+                                        + " class=" + (result == null ? "null" : result.getClass().getName()));
+                            }
+                        }
+                    });
+                    log("hooked YellowPage HTTP request: H.B(String,boolean)");
+                }
+            }
+        } catch (Throwable e) {
+            log("YellowPage HTTP decision hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookMeteredNetworkGuard(ClassLoader cl) {
         try {
             Class<?> cm = Class.forName("android.net.ConnectivityManager", false, cl);
@@ -948,6 +1019,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPagePullTask(cl, context);
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
+                            hookYellowPageHttpDecision(cl);
                             hookYellowPageDatabaseWrites(cl);
                             hookPullTaskPipeline(cl, context);
                             hookMeteredNetworkGuard(cl);
