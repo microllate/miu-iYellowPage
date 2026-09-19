@@ -597,7 +597,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     + ".d() return=" + dMethod.getReturnType().getName());
 
             Object result = dMethod.invoke(hObject);
-
             if (result == null) {
                 log("H NETWORK PROBE RESULT: null");
                 return;
@@ -1197,7 +1196,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
-
     private static void hookLiveHttpAllMethods(Object connection) {
         try {
             if (connection == null) return;
@@ -1377,6 +1375,76 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         } catch (Throwable e) {
             log("STREAM REQUEST hook failed: " + e.getClass().getSimpleName());
         }
+    }
+
+    private static void hookCriticalYellowPageGates(ClassLoader cl) {
+        log("CRITICAL GATES INSTALL START");
+        try {
+            Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+            int found = 0;
+            for (Method m : j0.getDeclaredMethods()) {
+                Class<?>[] p = m.getParameterTypes();
+                if (!"j".equals(m.getName()) || p.length != 1 || p[0] != Integer.TYPE) continue;
+                final Method target = m;
+                XposedBridge.hookMethod(target, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        Object v = param.args != null && param.args.length > 0 ? param.args[0] : null;
+                        log("CRITICAL J0.j ENTER value=" + String.valueOf(v)
+                                + " return=" + target.getReturnType().getName());
+                        if (Integer.valueOf(-1).equals(v)) {
+                            log("CRITICAL J0.j VALUE=-1");
+                            StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+                            StringBuilder out = new StringBuilder("CRITICAL J0.j -1 STACK:");
+                            int n = 0;
+                            for (StackTraceElement e : trace) {
+                                if (String.valueOf(e).contains("HookEntry")) continue;
+                                out.append(" | ").append(String.valueOf(e));
+                                if (++n >= 12) break;
+                            }
+                            log(out.toString());
+                        }
+                    }
+                });
+                found++;
+                log("CRITICAL J0 SETTER HOOKED: " + m.toGenericString());
+            }
+            log("CRITICAL J0 SETTER COUNT=" + found);
+        } catch (Throwable e) {
+            log("CRITICAL J0 SETTER FAILED: " + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
+        }
+
+        try {
+            Class<?> q = Class.forName("Q.a", false, cl);
+            int found = 0;
+            for (Method m : q.getDeclaredMethods()) {
+                Class<?>[] p = m.getParameterTypes();
+                if (!"a".equals(m.getName()) || !Modifier.isStatic(m.getModifiers())
+                        || m.getReturnType() != Boolean.TYPE
+                        || p.length != 1 || p[0] != Context.class) continue;
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("CRITICAL Q.a ENTER");
+                    }
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            log("CRITICAL Q.a THROW: " + param.getThrowable().getClass().getName()
+                                    + ": " + String.valueOf(param.getThrowable().getMessage()));
+                        } else {
+                            log("CRITICAL Q.a RESULT=" + String.valueOf(param.getResult()));
+                        }
+                    }
+                });
+                found++;
+                log("CRITICAL Q.a HOOKED: " + m.toGenericString());
+            }
+            log("CRITICAL Q.a COUNT=" + found);
+        } catch (Throwable e) {
+            log("CRITICAL Q.a FAILED: " + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
+        }
+        log("CRITICAL GATES INSTALL END");
     }
 
     private static void hookYellowPageNetworkGates(ClassLoader cl) {
@@ -1797,8 +1865,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                         || method.getParameterTypes()[0] != Context.class) {
                     continue;
                 }
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
-                    @Override
+                XposedBridge.hookMethod(method, new XC_MethodHook() {                    @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         param.setResult(true);
                     }
@@ -2116,6 +2183,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
         try {
             ClassLoader cl = lpparam.classLoader;
+            hookCriticalYellowPageGates(cl);
 
             hookBooleanContextMethod(
                     cl, "miui.yellowpage.YellowPageUtils",
