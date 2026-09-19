@@ -465,9 +465,15 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             // inherit the real request/response method from a base class.
             Class<?> parent = cls.getSuperclass();
             if (parent != null && parent != Object.class) {
+                log("H OBJECT SUPERCLASS: " + parent.getName());
                 for (Method method : parent.getDeclaredMethods()) {
                     final String methodName = method.getName();
                     final Class<?> returnType = method.getReturnType();
+
+                    final boolean isZeroArgHttpD =
+                            "d".equals(methodName)
+                                    && method.getParameterTypes().length == 0
+                                    && java.net.HttpURLConnection.class.isAssignableFrom(method.getReturnType());
 
                     XposedBridge.hookMethod(method, new XC_MethodHook() {
                         @Override
@@ -499,6 +505,48 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+            // Install a second, exact d() hook from the live H object's superclass.
+            // This is intentionally installed when the H instance is known to be live,
+            // avoiding any class-loading timing ambiguity in the earlier static scan.
+            if (parent != null && parent != Object.class) {
+                for (Method method : parent.getDeclaredMethods()) {
+                    if (!"d".equals(method.getName())
+                            || method.getParameterTypes().length != 0
+                            || !java.net.HttpURLConnection.class.isAssignableFrom(method.getReturnType())) {
+                        continue;
+                    }
+                    final Method liveD = method;
+                    final Class<?> liveOwner = parent;
+                    XposedBridge.hookMethod(liveD, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            log("J0.D LIVE ENTER: " + liveOwner.getName());
+                        }
+
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                Throwable t = param.getThrowable();
+                                log("J0.D LIVE THROW: " + t.getClass().getName()
+                                        + ": " + String.valueOf(t.getMessage()));
+                            } else {
+                                Object result = param.getResult();
+                                log("J0.D LIVE RESULT: "
+                                        + (result == null ? "null" : result.getClass().getName()));
+                                if (result instanceof java.net.HttpURLConnection) {
+                                    try {
+                                        log("J0.D LIVE URL: "
+                                                + String.valueOf(((java.net.HttpURLConnection) result).getURL()));
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    log("hooked LIVE J0.d(): " + liveOwner.getName());
+                }
+            }
 
     private static void hookYellowPageHttpDecision(ClassLoader cl) {
         try {
