@@ -1823,6 +1823,14 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         log("CRITICAL GATES INSTALL END");
     }
 
+    private static String safeCanonicalPath(java.io.File file) {
+        try {
+            return file.getCanonicalPath();
+        } catch (Throwable e) {
+            return "<canonical-error:" + e.getClass().getSimpleName() + ">";
+        }
+    }
+
     private static boolean recoverYellowPageMove(Object[] args) {
         try {
             java.io.File source = null;
@@ -1856,7 +1864,22 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 return false;
             }
 
+            log("MOVE RECOVERY TARGET: path=" + target
+                    + " exists=" + target.exists()
+                    + " file=" + target.isFile()
+                    + " dir=" + target.isDirectory()
+                    + " canRead=" + target.canRead()
+                    + " canWrite=" + target.canWrite()
+                    + " length=" + target.length()
+                    + " abs=" + target.getAbsolutePath()
+                    + " canonical=" + safeCanonicalPath(target));
+
             java.io.File parent = target.getParentFile();
+            log("MOVE RECOVERY PARENT: " + String.valueOf(parent)
+                    + " exists=" + (parent != null && parent.exists())
+                    + " dir=" + (parent != null && parent.isDirectory())
+                    + " canWrite=" + (parent != null && parent.canWrite())
+                    + " canExecute=" + (parent != null && parent.canExecute()));
             if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.exists()) {
                 log("MOVE RECOVERY: cannot create target parent=" + parent);
                 return false;
@@ -1875,8 +1898,18 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             java.io.InputStream in = null;
             java.io.OutputStream out = null;
             try {
-                in = new java.io.FileInputStream(source);
-                out = new java.io.FileOutputStream(target, false);
+                // First try the original atomic-style replacement. renameTo can
+                // replace an existing regular file without opening that file.
+                if (!target.exists() && source.renameTo(target)) {
+                    copied = target.isFile() && target.length() > 0;
+                    log("MOVE RECOVERY: renameTo(new target)=" + copied);
+                } else if (target.exists()) {
+                    log("MOVE RECOVERY: target already exists; testing writable replacement");
+                }
+
+                if (!copied) {
+                    in = new java.io.FileInputStream(source);
+                    out = new java.io.FileOutputStream(target, false);
                 byte[] buffer = new byte[32768];
                 int n;
                 while ((n = in.read(buffer)) != -1) {
