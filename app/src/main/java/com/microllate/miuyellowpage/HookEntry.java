@@ -426,66 +426,88 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
     private static void hookHConnectionResponse(java.net.HttpURLConnection connection) {
         try {
-            if (connection == null) {
-                return;
-            }
+            if (connection == null) return;
 
-            final Class<?> connectionClass = connection.getClass();
-            log("HTTP LIVE CLASS: " + connectionClass.getName());
+            final Class<?> runtime = connection.getClass();
+            log("HTTP TRACE CLASS: " + runtime.getName());
 
             int hooked = 0;
-            for (Method method : connectionClass.getMethods()) {
-                String name = method.getName();
-                Class<?>[] params = method.getParameterTypes();
+            Class<?> cls = runtime;
+            int depth = 0;
 
-                if ((("getResponseCode".equals(name) || "getInputStream".equals(name)
-                        || "getErrorStream".equals(name))
-                        && params.length == 0)) {
+            while (cls != null && cls != Object.class && depth++ < 8) {
+                for (final Method method : cls.getDeclaredMethods()) {
+                    String name = method.getName();
+                    Class<?>[] params = method.getParameterTypes();
 
-                    final String methodName = name;
+                    boolean target =
+                            params.length == 0
+                            && ("connect".equals(name)
+                                || "getResponseCode".equals(name)
+                                || "getInputStream".equals(name)
+                                || "getErrorStream".equals(name)
+                                || "getOutputStream".equals(name));
+
+                    if (!target) continue;
+
+                    final String key = method.getDeclaringClass().getName()
+                            + "#" + name + "#" + method.toGenericString();
+
+                    synchronized (HookEntry.class) {
+                        if (HTTP_TRACE_HOOKED.contains(key)) continue;
+                        HTTP_TRACE_HOOKED.add(key);
+                    }
+
                     try {
+                        method.setAccessible(true);
                         XposedBridge.hookMethod(method, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) {
-                                log("HTTP LIVE " + methodName + " ENTER url=" + safeConnectionUrl(param.thisObject));
+                                log("HTTP TRACE ENTER: "
+                                        + method.getDeclaringClass().getName()
+                                        + "." + method.getName()
+                                        + " url=" + safeConnectionUrl(param.thisObject));
                             }
 
                             @Override
                             protected void afterHookedMethod(MethodHookParam param) {
                                 if (param.hasThrowable()) {
                                     Throwable t = param.getThrowable();
-                                    log("HTTP LIVE " + methodName + " THROW "
-                                            + t.getClass().getName() + ": "
-                                            + String.valueOf(t.getMessage()));
+                                    log("HTTP TRACE THROW: " + method.getName()
+                                            + " " + t.getClass().getName()
+                                            + ": " + String.valueOf(t.getMessage()));
+                                    return;
+                                }
+
+                                Object result = param.getResult();
+                                if ("getResponseCode".equals(method.getName())) {
+                                    log("HTTP TRACE RESPONSE CODE: " + String.valueOf(result));
+                                } else if ("getInputStream".equals(method.getName())
+                                        || "getOutputStream".equals(method.getName())) {
+                                    log("HTTP TRACE " + method.getName()
+                                            + " RESULT: "
+                                            + (result == null ? "null"
+                                            : result.getClass().getName()));
                                 } else {
-                                    Object result = param.getResult();
-                                    String resultText;
-                                    if (result == null) {
-                                        resultText = "null";
-                                    } else {
-                                        resultText = result.getClass().getName() + ":" + String.valueOf(result);
-                                        if (resultText.length() > 500) {
-                                            resultText = resultText.substring(0, 500);
-                                        }
-                                    }
-                                    log("HTTP LIVE " + methodName + " RESULT " + resultText);
+                                    log("HTTP TRACE RESULT: " + method.getName()
+                                            + "=" + String.valueOf(result));
                                 }
                             }
                         });
                         hooked++;
-                        log("hooked HTTP LIVE method: " + connectionClass.getName()
-                                + "." + methodName + "()");
+                        log("HTTP TRACE HOOKED: " + key);
                     } catch (Throwable e) {
-                        log("HTTP LIVE hook failed " + methodName + ": "
-                                + e.getClass().getName());
+                        log("HTTP TRACE HOOK FAIL: " + key + " "
+                                + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
                     }
                 }
+                cls = cls.getSuperclass();
             }
 
-            log("HTTP LIVE hooks installed=" + hooked
-                    + " class=" + connectionClass.getName());
+            log("HTTP TRACE HOOKS INSTALLED=" + hooked
+                    + " runtime=" + runtime.getName());
         } catch (Throwable e) {
-            log("HTTP LIVE hook install THROW: " + e.getClass().getName()
+            log("HTTP TRACE INSTALL THROW: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
         }
     }
