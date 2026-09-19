@@ -1618,6 +1618,45 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         log("CRITICAL GATES INSTALL END");
     }
 
+    private static void hookYellowPageDownload(ClassLoader cl) {
+        try {
+            Class<?> d = Class.forName("o0.d", false, cl);
+            int found = 0;
+            for (Method method : d.getDeclaredMethods()) {
+                if (!"p".equals(method.getName())) continue;
+                final Method target = method;
+                XposedBridge.hookMethod(target, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            log("DOWNLOAD ENTER: o0.d.p args=" + formatHookArgs(param.args));
+                        } catch (Throwable e) {
+                            log("DOWNLOAD ENTER log failed: " + e.getClass().getSimpleName());
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("DOWNLOAD THROW: o0.d.p " + t.getClass().getName()
+                                    + ": " + String.valueOf(t.getMessage()));
+                        } else {
+                            Object r = param.getResult();
+                            log("DOWNLOAD RESULT: o0.d.p -> " + String.valueOf(r));
+                        }
+                    }
+                });
+                found++;
+                log("hooked DOWNLOAD: " + target);
+            }
+            log("DOWNLOAD hooks installed=" + found);
+        } catch (Throwable e) {
+            log("DOWNLOAD hook failed: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookYellowPageDataDecode(ClassLoader cl) {
         try {
             // Trace every method in the post-response pipeline that receives the
@@ -2862,6 +2901,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             hookYellowPageActualRequestBuilder(cl);
             hookYellowPageRegionParam(cl);
             hookYellowPageDataDecode(cl);
+            hookYellowPageDownload(cl);
             hookGlobalHttpsConnection(cl);
             try {
                 log("CRITICAL CALL BEFORE");
