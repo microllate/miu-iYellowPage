@@ -1971,6 +1971,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             boolean wasEnforcing = enforcing != null
                     && enforcing.trim().equalsIgnoreCase("Enforcing");
 
+            boolean valid;
             String localReplace;
             if (wasEnforcing) {
                 localReplace =
