@@ -749,6 +749,82 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     }
 
 
+    private static void hookGlobalHttpsConnection(ClassLoader cl) {
+        try {
+            String[] names = new String[] {
+                    "com.android.okhttp.internal.huc.HttpsURLConnectionImpl",
+                    "com.android.okhttp.internal.huc.HttpURLConnectionImpl"
+            };
+            int total = 0;
+            for (String className : names) {
+                try {
+                    Class<?> cls = Class.forName(className, false, cl);
+                    log("GLOBAL HTTP CLASS FOUND: " + className);
+                    Class<?> current = cls;
+                    int depth = 0;
+                    while (current != null && current != Object.class && depth < 8) {
+                        for (Method method : current.getDeclaredMethods()) {
+                            String name = method.getName();
+                            if (!("connect".equals(name)
+                                    || "getResponseCode".equals(name)
+                                    || "getResponseMessage".equals(name)
+                                    || "getInputStream".equals(name)
+                                    || "getErrorStream".equals(name))) {
+                                continue;
+                            }
+                            if (method.getParameterTypes().length != 0) continue;
+                            final String methodName = name;
+                            final Class<?> declaring = current;
+                            try {
+                                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                                    @Override
+                                    protected void beforeHookedMethod(MethodHookParam param) {
+                                        log("GLOBAL HTTP ENTER: " + methodName
+                                                + " class=" + param.thisObject.getClass().getName()
+                                                + " url=" + safeConnectionUrl(param.thisObject));
+                                    }
+
+                                    @Override
+                                    protected void afterHookedMethod(MethodHookParam param) {
+                                        if (param.hasThrowable()) {
+                                            Throwable t = param.getThrowable();
+                                            log("GLOBAL HTTP THROW: " + methodName + " "
+                                                    + t.getClass().getName() + ": "
+                                                    + String.valueOf(t.getMessage()));
+                                        } else {
+                                            Object result = param.getResult();
+                                            String value = String.valueOf(result);
+                                            if (value.length() > 800) value = value.substring(0, 800);
+                                            log("GLOBAL HTTP RESULT: " + methodName + " -> " + value
+                                                    + " resultClass="
+                                                    + (result == null ? "null" : result.getClass().getName()));
+                                        }
+                                    }
+                                });
+                                total++;
+                                log("GLOBAL HTTP HOOKED: " + declaring.getName() + "." + methodName);
+                            } catch (Throwable e) {
+                                log("GLOBAL HTTP HOOK FAILED: " + declaring.getName() + "."
+                                        + methodName + " " + e.getClass().getName() + ": "
+                                        + String.valueOf(e.getMessage()));
+                            }
+                        }
+                        current = current.getSuperclass();
+                        depth++;
+                    }
+                } catch (Throwable e) {
+                    log("GLOBAL HTTP CLASS FAILED: " + className + " "
+                            + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
+                }
+            }
+            log("GLOBAL HTTP HOOKS INSTALLED=" + total);
+        } catch (Throwable e) {
+            log("GLOBAL HTTP INSTALL FAILED: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
+
     private static void hookYellowPageHttpDecision(ClassLoader cl) {
         // Trace the real j0.k setter. H.u() returns 6 immediately for k values other than 0/1.
         try {
@@ -2293,6 +2369,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             log("YELLOWPAGE LOAD ENTER classLoader=" + String.valueOf(cl));
             hookYellowPageRequestMode(cl);
             hookYellowPageActualRequestBuilder(cl);
+            hookGlobalHttpsConnection(cl);
             try {
                 log("CRITICAL CALL BEFORE");
                 hookCriticalYellowPageGates(cl);
