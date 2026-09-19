@@ -853,6 +853,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 ? "null" : result.getClass().getName()));
 
                         if (result instanceof java.net.HttpURLConnection) {
+                            hookLiveResponseCodeFromObject(result);
                             try {
                                 java.net.HttpURLConnection conn =
                                         (java.net.HttpURLConnection) result;
@@ -875,6 +876,58 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookLiveResponseCodeFromObject(final Object connection) {
+        try {
+            if (connection == null) return;
+            Class<?> current = connection.getClass();
+            int depth = 0;
+            int found = 0;
+            while (current != null && current != Object.class && depth < 8) {
+                for (Method method : current.getDeclaredMethods()) {
+                    if (!"getResponseCode".equals(method.getName())
+                            || method.getParameterTypes().length != 0
+                            || method.getReturnType() != Integer.TYPE) {
+                        continue;
+                    }
+                    try {
+                        XposedBridge.hookMethod(method, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                log("LIVE RESPONSE ENTER: getResponseCode");
+                            }
+
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("LIVE RESPONSE THROW: getResponseCode "
+                                            + t.getClass().getName() + ": "
+                                            + String.valueOf(t.getMessage()));
+                                    return;
+                                }
+                                log("LIVE RESPONSE CODE: " + String.valueOf(param.getResult()));
+                            }
+                        });
+                        found++;
+                        log("LIVE RESPONSE HOOKED: "
+                                + current.getName() + ".getResponseCode()");
+                    } catch (Throwable e) {
+                        log("LIVE RESPONSE HOOK FAILED: "
+                                + current.getName() + ".getResponseCode "
+                                + e.getClass().getSimpleName());
+                    }
+                }
+                current = current.getSuperclass();
+                depth++;
+            }
+            log("LIVE RESPONSE HOOKS INSTALLED: " + found
+                    + " class=" + connection.getClass().getName());
+        } catch (Throwable e) {
+            log("LIVE RESPONSE OBJECT HOOK FAILED: "
+                    + e.getClass().getSimpleName());
+        }
+    }
 
     private static void hookYellowPageLiveHttp(ClassLoader cl) {
         try {
