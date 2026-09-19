@@ -458,23 +458,62 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
                 log("hooked PullTask returned method: " + cls.getName() + "."
                         + methodName + "(" + method.getParameterTypes().length
-                        + " args) -> " + returnType.getSimpleName());
+                        + " args) -> " + returnType.getName());
             }
 
-            // Also inspect one superclass: obfuscated networking helpers often
-            // inherit the real request/response method from a base class.
             Class<?> parent = cls.getSuperclass();
             if (parent != null && parent != Object.class) {
                 log("H OBJECT SUPERCLASS: " + parent.getName());
-                for (Method method : parent.getDeclaredMethods()) {
+
+                Method[] parentMethods = parent.getDeclaredMethods();
+                log("H SUPER METHODS=" + parentMethods.length);
+
+                // H.u() directly calls j0.d(). Do not filter by the reflected
+                // return type here: some optimized/obfuscated builds can expose
+                // a different reflection type even though the bytecode call is
+                // the zero-argument d() method we need to observe.
+                for (Method method : parentMethods) {
                     final String methodName = method.getName();
                     final Class<?> returnType = method.getReturnType();
 
-                    final boolean isZeroArgHttpD =
-                            "d".equals(methodName)
-                                    && method.getParameterTypes().length == 0
-                                    && java.net.HttpURLConnection.class.isAssignableFrom(method.getReturnType());
+                    if ("d".equals(methodName)
+                            && method.getParameterTypes().length == 0) {
+                        final Method dMethod = method;
+                        final Class<?> declaring = parent;
+                        XposedBridge.hookMethod(dMethod, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                log("J0.D LIVE ENTER: " + declaring.getName()
+                                        + ".d() return=" + dMethod.getReturnType().getName());
+                            }
 
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("J0.D LIVE THROW: " + t.getClass().getName()
+                                            + ": " + String.valueOf(t.getMessage()));
+                                    return;
+                                }
+
+                                Object result = param.getResult();
+                                log("J0.D LIVE RESULT: "
+                                        + (result == null ? "null" : result.getClass().getName()));
+                                if (result instanceof java.net.HttpURLConnection) {
+                                    try {
+                                        log("J0.D LIVE URL: "
+                                                + ((java.net.HttpURLConnection) result).getURL());
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+                            }
+                        });
+                        log("hooked LIVE J0.d(): " + parent.getName()
+                                + ".d() -> " + returnType.getName());
+                    }
+
+                    // Keep the generic superclass hooks for additional network
+                    // methods and diagnostics.
                     XposedBridge.hookMethod(method, new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
@@ -497,14 +536,14 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
                     log("hooked PullTask returned base method: " + parent.getName() + "."
                             + methodName + "(" + method.getParameterTypes().length
-                            + " args) -> " + returnType.getSimpleName());
+                            + " args) -> " + returnType.getName());
                 }
             }
         } catch (Throwable e) {
-            log("PullTask returned-object hook failed: " + e.getClass().getSimpleName());
+            log("PullTask returned-object hook failed: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
         }
     }
-
 
 
     private static void hookYellowPageHttpDecision(ClassLoader cl) {
