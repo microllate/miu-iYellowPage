@@ -419,6 +419,48 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+    private static void hookYellowPageDataResult(ClassLoader cl) {
+        try {
+            Class<?> cls = Class.forName("o0.g", false, cl);
+            int found = 0;
+            for (Method method : cls.getDeclaredMethods()) {
+                if (!"t".equals(method.getName())
+                        || method.getReturnType() != Boolean.TYPE) {
+                    continue;
+                }
+                final Method target = method;
+                XposedBridge.hookMethod(target, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("DATA RESULT DECISION ENTER: " + target.toGenericString());
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            log("DATA RESULT DECISION THROW: "
+                                    + param.getThrowable().getClass().getName() + ": "
+                                    + String.valueOf(param.getThrowable().getMessage()));
+                            return;
+                        }
+                        Object result = param.getResult();
+                        log("DATA RESULT DECISION RESULT: original=" + String.valueOf(result));
+                        if (Boolean.FALSE.equals(result)) {
+                            param.setResult(true);
+                            log("DATA RESULT DECISION BYPASS: false -> true");
+                        }
+                    }
+                });
+                found++;
+                log("DATA RESULT DECISION HOOKED: " + target.toGenericString());
+            }
+            log("DATA RESULT DECISION HOOK COUNT=" + found);
+        } catch (Throwable e) {
+            log("DATA RESULT DECISION HOOK FAILED: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookPullTaskExecution(ClassLoader cl) {
         try {
             Class<?> cls = Class.forName("o0.g", false, cl);
@@ -3413,6 +3455,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             log("YellowPageProvider.onCreate");
                             hookYellowPagePullTask(cl, context);
                             hookYellowPagePullDecision(cl);
+                            hookYellowPageDataResult(cl);
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
                             hookYellowPageHttpDecision(cl);
