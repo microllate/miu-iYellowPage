@@ -86,33 +86,79 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
-private static void hookYellowPagePullTask(ClassLoader cl) {
+private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         try {
-            Class<?> pullTask = Class.forName("Lo0.g", false, cl);
-            for (Method method : pullTask.getDeclaredMethods()) {
-                Class<?>[] p = method.getParameterTypes();
-                if (!"y".equals(method.getName())
-                        || method.getReturnType() != Boolean.TYPE
-                        || p.length != 1
-                        || p[0] != Context.class) {
-                    continue;
-                }
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        log("YellowPagePullTask.y() ENTER");
-                    }
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        log("YellowPagePullTask.y() RESULT=" + param.getResult());
-                    }
-                });
-                log("hooked Lo0.g.y(Context)");
+            if (context == null) {
+                log("PullTask scan skipped: context=null");
                 return;
             }
-            log("Lo0.g.y(Context) not found");
+
+            int found = 0;
+            java.util.ArrayList<String> paths = new java.util.ArrayList<>();
+            paths.add(context.getApplicationInfo().sourceDir);
+            String[] splits = context.getApplicationInfo().splitSourceDirs;
+            if (splits != null) {
+                for (String split : splits) {
+                    if (split != null && !paths.contains(split)) {
+                        paths.add(split);
+                    }
+                }
+            }
+
+            for (String apkPath : paths) {
+                DexFile dex = new DexFile(apkPath);
+                try {
+                    Enumeration<String> entries = dex.entries();
+                    while (entries.hasMoreElements()) {
+                        String name = entries.nextElement();
+                        if (name.indexOf('.') < 0) {
+                            continue;
+                        }
+
+                        try {
+                            Class<?> candidate = Class.forName(name, false, cl);
+                            for (Method method : candidate.getDeclaredMethods()) {
+                                Class<?>[] p = method.getParameterTypes();
+                                if (!"y".equals(method.getName())
+                                        || method.getReturnType() != Boolean.TYPE
+                                        || p.length != 1
+                                        || p[0] != Context.class) {
+                                    continue;
+                                }
+
+                                final String className = candidate.getName();
+                                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                                    @Override
+                                    protected void beforeHookedMethod(MethodHookParam param) {
+                                        log("PullTask candidate ENTER: "
+                                                + className + ".y(Context)");
+                                    }
+
+                                    @Override
+                                    protected void afterHookedMethod(MethodHookParam param) {
+                                        log("PullTask candidate RESULT: "
+                                                + className + ".y(Context)=" + param.getResult());
+                                    }
+                                });
+                                found++;
+                                log("hooked PullTask candidate: "
+                                        + className + ".y(Context)");
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                } finally {
+                    dex.close();
+                }
+            }
+
+            if (found == 0) {
+                log("PullTask candidate y(Context):boolean not found");
+            } else {
+                log("PullTask candidate hooks installed: " + found);
+            }
         } catch (Throwable e) {
-            log("PullTask hook failed: " + e.getClass().getSimpleName());
+            log("PullTask scan failed: " + e.getClass().getSimpleName());
         }
     }
 
@@ -441,7 +487,14 @@ private static void hookYellowPagePullTask(ClassLoader cl) {
                     cl, "miui.yellowpage.YellowPageUtils",
                     "isYellowPageEnable");
             hookYellowPageSyncGate(cl);
-            hookYellowPagePullTask(cl);
+            Context appContext = null;
+            try {
+                Class<?> activityThread = Class.forName("android.app.ActivityThread");
+                appContext = (Context) XposedHelpers.callStaticMethod(
+                        activityThread, "currentApplication");
+            } catch (Throwable ignored) {
+            }
+            hookYellowPagePullTask(cl, appContext);
 
             Class<?> dbHelperClass = Class.forName(
                     "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
