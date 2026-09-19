@@ -1875,17 +1875,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
-    /*
-     * KernelSU normally keeps a root app in its own mount namespace. KernelSU's
-     * own FAQ documents nsenter -t 1 -m as the way to execute a command in the
-     * global mount namespace. Use this only for the final filesystem operation;
-     * the SELinux domain remains the KSU root domain.
-     */
-    private static String runRootGlobalMountCommand(String command) {
-        return runRootCommand(
-                "nsenter -t 1 -m -- /system/bin/sh -c " + shellQuote(command));
-    }
-
     private static boolean recoverYellowPageMove(Object[] args) {
         try {
             java.io.File source = null;
@@ -1959,52 +1948,59 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             String targetPath = target.getAbsolutePath();
             String parentPath = parent == null ? "" : parent.getAbsolutePath();
 
-            // First inspect the global mount namespace. If the YellowPage process
-            // inherited a restricted/read-only app mount, this is the namespace
-            // where the real /data tree is visible.
+            // The first global-namespace attempt is unavailable on this device:
+            // /proc/1/ns/mnt is hidden from the KSU root process. Do not treat that
+            // as a filesystem failure; diagnose the actual SELinux/DAC denial instead.
             String diagnosticCommand =
                     "id; getenforce; "
                     + "ls -ldZ " + shellQuote(parentPath) + "; "
                     + "ls -lZ " + shellQuote(targetPath) + " " + shellQuote(sourcePath) + "; "
-                    + "lsattr " + shellQuote(targetPath) + " " + shellQuote(sourcePath);
-            String diagnostic = runRootGlobalMountCommand(diagnosticCommand);
-            log("MOVE RECOVERY GLOBAL DIAG: "
+                    + "lsattr " + shellQuote(targetPath) + " " + shellQuote(sourcePath) + "; "
+                    + "logcat -d -b all -t 200 2>/dev/null | grep -iE 'avc:.*(yellowpage|miui.yellowpage|yellow_pages.dat)' | tail -20";
+            String diagnostic = runRootCommand(diagnosticCommand);
+            log("MOVE RECOVERY LOCAL DIAG: "
                     + (diagnostic == null ? "<failed>" : diagnostic));
 
-            // Clear an immutable file flag if present, then replace the file
-            // directly. Do this in PID 1's mount namespace first. KernelSU
-            // documents this nsenter pattern for escaping an app mount namespace.
-            String globalReplace =
-                    "chattr -i " + shellQuote(targetPath) + " 2>/dev/null; "
-                    + "mv -f " + shellQuote(sourcePath) + " " + shellQuote(targetPath);
-            String replaceResult = runRootGlobalMountCommand(globalReplace);
+            // A root process in the KSU SELinux domain can still be denied by
+            // SELinux. For this diagnostic-only recovery, temporarily switch
+            // enforcement off for the single mv operation, then immediately
+            // restore the original enforcement state. This lets us distinguish
+            // an SELinux denial from a mount/DAC problem without leaving the
+            // device permissive.
+            String enforcing = runRootCommand("getenforce");
+            boolean wasEnforcing = enforcing != null
+                    && enforcing.trim().equalsIgnoreCase("Enforcing");
 
-            boolean valid = target.isFile() && target.length() > 0 && !source.exists();
-            log("MOVE RECOVERY GLOBAL RESULT: command="
-                    + (replaceResult == null ? "<failed>" : replaceResult)
+            String localReplace;
+            if (wasEnforcing) {
+                localReplace =
+                        "setenforce 0; "
+                        + "chattr -i " + shellQuote(targetPath) + " 2>/dev/null; "
+                        + "mv -f " + shellQuote(sourcePath) + " " + shellQuote(targetPath) + "; "
+                        + "rc=$?; setenforce 1; exit $rc";
+            } else {
+                localReplace =
+                        "chattr -i " + shellQuote(targetPath) + " 2>/dev/null; "
+                        + "mv -f " + shellQuote(sourcePath) + " " + shellQuote(targetPath);
+            }
+
+            String localResult = runRootCommand(localReplace);
+            valid = target.isFile() && target.length() > 0 && !source.exists();
+            log("MOVE RECOVERY SELINUX TEST: enforcingBefore=" + wasEnforcing
+                    + " command=" + (localResult == null ? "<failed>" : localResult)
                     + " valid=" + valid
                     + " targetLength=" + target.length()
                     + " sourceExists=" + source.exists());
 
-            // If the global namespace path did not work, retry in the current
-            // namespace. This covers devices where the app and global namespaces
-            // already expose the same writable tree.
             if (!valid) {
-                String localReplace =
-                        "chattr -i " + shellQuote(targetPath) + " 2>/dev/null; "
-                        + "mv -f " + shellQuote(sourcePath) + " " + shellQuote(targetPath);
-                String localResult = runRootCommand(localReplace);
-                valid = target.isFile() && target.length() > 0 && !source.exists();
-                log("MOVE RECOVERY LOCAL RESULT: command="
-                        + (localResult == null ? "<failed>" : localResult)
-                        + " valid=" + valid
-                        + " targetLength=" + target.length()
-                        + " sourceExists=" + source.exists());
+                // Capture the AVC generated by the test before returning. This
+                // gives us the exact SELinux rule if the denial persists.
+                String avc = runRootCommand(
+                        "logcat -d -b all -t 300 2>/dev/null | "
+                        + "grep -iE 'avc:.*(yellowpage|miui.yellowpage|yellow_pages.dat)' | tail -30");
+                log("MOVE RECOVERY AVC AFTER TEST: "
+                        + (avc == null ? "<none-or-unreadable>" : avc));
             }
-
-            // Restore the device's expected SELinux label in the global namespace.
-            // Failure here is non-fatal; the data file itself is already replaced.
-            runRootGlobalMountCommand("restorecon " + shellQuote(targetPath));
 
             valid = target.isFile() && target.length() > 0 && !source.exists();
             log("MOVE RECOVERY ROOT RESULT: valid=" + valid
