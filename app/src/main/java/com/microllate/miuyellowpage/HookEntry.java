@@ -1823,6 +1823,87 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         log("CRITICAL GATES INSTALL END");
     }
 
+    private static boolean recoverYellowPageMove(Object[] args) {
+        try {
+            java.io.File source = null;
+            java.io.File target = null;
+
+            if (args != null) {
+                for (Object arg : args) {
+                    if (!(arg instanceof String)) continue;
+                    String s = (String) arg;
+                    if (s.contains(".yellow_pages.dat.tmp")) {
+                        java.io.File f = new java.io.File(s);
+                        if (f.isFile()) source = f;
+                    } else if (s.endsWith("yellow_pages.dat")) {
+                        target = new java.io.File(s);
+                    }
+                }
+            }
+
+            if (source == null) {
+                java.io.File fallback = new java.io.File(
+                        "/data/user/0/com.miui.yellowpage/files/.yellow_pages.dat.tmp");
+                if (fallback.isFile()) source = fallback;
+            }
+            if (target == null) {
+                target = new java.io.File(
+                        "/data/user/0/com.miui.yellowpage/files/yellowpage/yellow_pages.dat");
+            }
+
+            if (source == null || !source.isFile()) {
+                log("MOVE RECOVERY: source missing");
+                return false;
+            }
+
+            java.io.File parent = target.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.exists()) {
+                log("MOVE RECOVERY: cannot create target parent=" + parent);
+                return false;
+            }
+
+            if (target.exists() && !target.delete()) {
+                log("MOVE RECOVERY: cannot replace existing target=" + target);
+                return false;
+            }
+
+            boolean renamed = source.renameTo(target);
+            if (!renamed) {
+                log("MOVE RECOVERY: renameTo failed, copying instead");
+                java.io.InputStream in = null;
+                java.io.OutputStream out = null;
+                try {
+                    in = new java.io.FileInputStream(source);
+                    out = new java.io.FileOutputStream(target, false);
+                    byte[] buffer = new byte[32768];
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        if (n > 0) out.write(buffer, 0, n);
+                    }
+                    out.flush();
+                } finally {
+                    try { if (in != null) in.close(); } catch (Throwable ignored) {}
+                    try { if (out != null) out.close(); } catch (Throwable ignored) {}
+                }
+                if (!target.isFile() || target.length() <= 0) {
+                    log("MOVE RECOVERY: copy failed");
+                    return false;
+                }
+                if (!source.delete()) {
+                    log("MOVE RECOVERY: copied but source delete failed");
+                }
+            }
+
+            log("MOVE RECOVERY OK: " + source + " -> " + target
+                    + " bytes=" + target.length());
+            return target.isFile() && target.length() > 0;
+        } catch (Throwable e) {
+            log("MOVE RECOVERY FAILED: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+            return false;
+        }
+    }
+
     private static void hookYellowPageDownload(ClassLoader cl) {
         try {
             Class<?> d = Class.forName("o0.d", false, cl);
@@ -1856,6 +1937,44 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 found++;
             }
             log("DOWNLOAD o0.d.p hooks installed=" + found);
+
+            // The CDN file is now downloaded successfully, but o0.d.q() fails
+            // while moving .yellow_pages.dat.tmp to the final yellow_pages.dat.
+            // Recover that exact filesystem transition and suppress only the
+            // known "failed to move" exception.
+            try {
+                for (Method method : d.getDeclaredMethods()) {
+                    if (!"q".equals(method.getName())) continue;
+                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            log("MOVE ENTER: o0.d.q args=" + formatHookArgs(param.args));
+                        }
+
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (!param.hasThrowable()) {
+                                log("MOVE RESULT: o0.d.q -> " + String.valueOf(param.getResult()));
+                                return;
+                            }
+
+                            Throwable t = param.getThrowable();
+                            log("MOVE THROW: o0.d.q " + t.getClass().getName()
+                                    + ": " + String.valueOf(t.getMessage()));
+
+                            if (String.valueOf(t.getMessage()).contains("failed to move")
+                                    && recoverYellowPageMove(param.args)) {
+                                param.setThrowable(null);
+                                log("MOVE RECOVERY: suppressed o0.d.q failure");
+                            }
+                        }
+                    });
+                    log("MOVE hook installed: " + method.toGenericString());
+                }
+            } catch (Throwable e) {
+                log("MOVE hook install failed: " + e.getClass().getName()
+                        + ": " + String.valueOf(e.getMessage()));
+            }
 
             // o0.d.p wraps the underlying transport exception as a generic
             // "failed to download file". Hook URL.openConnection and the
