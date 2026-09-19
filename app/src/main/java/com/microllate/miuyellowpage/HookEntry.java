@@ -1864,79 +1864,74 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 return false;
             }
 
-            log("MOVE RECOVERY TARGET: path=" + target
-                    + " exists=" + target.exists()
-                    + " file=" + target.isFile()
-                    + " dir=" + target.isDirectory()
-                    + " canRead=" + target.canRead()
-                    + " canWrite=" + target.canWrite()
-                    + " length=" + target.length()
-                    + " abs=" + target.getAbsolutePath()
-                    + " canonical=" + safeCanonicalPath(target));
-
             java.io.File parent = target.getParentFile();
-            log("MOVE RECOVERY PARENT: " + String.valueOf(parent)
-                    + " exists=" + (parent != null && parent.exists())
-                    + " dir=" + (parent != null && parent.isDirectory())
-                    + " canWrite=" + (parent != null && parent.canWrite())
-                    + " canExecute=" + (parent != null && parent.canExecute()));
             if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.exists()) {
                 log("MOVE RECOVERY: cannot create target parent=" + parent);
                 return false;
             }
 
+            log("MOVE RECOVERY TARGET: path=" + safeCanonicalPath(target)
+                    + " exists=" + target.exists()
+                    + " file=" + target.isFile()
+                    + " dir=" + target.isDirectory()
+                    + " canRead=" + target.canRead()
+                    + " canWrite=" + target.canWrite()
+                    + " length=" + target.length());
+            log("MOVE RECOVERY PARENT: " + String.valueOf(parent)
+                    + " exists=" + (parent != null && parent.exists())
+                    + " dir=" + (parent != null && parent.isDirectory())
+                    + " canWrite=" + (parent != null && parent.canWrite())
+                    + " canExecute=" + (parent != null && parent.canExecute()));
+
             if (target.exists() && target.isDirectory()) {
-                log("MOVE RECOVERY: target is directory=" + target);
+                log("MOVE RECOVERY: target is directory");
                 return false;
             }
 
-            // Do not require unlinking the old target first. Android/Linux can
-            // reject delete/rename while another YellowPage reader still holds
-            // the old file. Opening the existing regular file with truncate=true
-            // is enough to replace its contents for this same-app data path.
-            boolean copied = false;
+            // First try a normal rename when the destination does not exist.
+            if (!target.exists() && source.renameTo(target)) {
+                log("MOVE RECOVERY OK: renameTo, bytes=" + target.length());
+                return target.isFile() && target.length() > 0;
+            }
+
+            // Otherwise copy the verified tmp file into the existing destination.
+            // This is the best effort available from the YellowPage process itself;
+            // an EACCES result is logged explicitly rather than being hidden.
             java.io.InputStream in = null;
             java.io.OutputStream out = null;
             try {
-                // First try the original atomic-style replacement. renameTo can
-                // replace an existing regular file without opening that file.
-                if (!target.exists() && source.renameTo(target)) {
-                    copied = target.isFile() && target.length() > 0;
-                    log("MOVE RECOVERY: renameTo(new target)=" + copied);
-                } else if (target.exists()) {
-                    log("MOVE RECOVERY: target already exists; testing writable replacement");
-                }
+                in = new java.io.FileInputStream(source);
+                out = new java.io.FileOutputStream(target, false);
 
-                if (!copied) {
-                    in = new java.io.FileInputStream(source);
-                    out = new java.io.FileOutputStream(target, false);
                 byte[] buffer = new byte[32768];
                 int n;
                 while ((n = in.read(buffer)) != -1) {
                     if (n > 0) out.write(buffer, 0, n);
                 }
                 out.flush();
-                copied = target.isFile() && target.length() > 0;
             } finally {
-                try { if (in != null) in.close(); } catch (Throwable ignored) {}
-                try { if (out != null) out.close(); } catch (Throwable ignored) {}
+                try {
+                    if (in != null) in.close();
+                } catch (Throwable ignored) {
+                }
+                try {
+                    if (out != null) out.close();
+                } catch (Throwable ignored) {
+                }
             }
 
-            if (!copied) {
-                log("MOVE RECOVERY: copy failed target=" + target
-                        + " exists=" + target.exists()
-                        + " isFile=" + target.isFile()
-                        + " length=" + target.length());
+            if (!target.isFile() || target.length() <= 0) {
+                log("MOVE RECOVERY: copy produced invalid target length=" + target.length());
                 return false;
             }
 
             if (!source.delete()) {
-                log("MOVE RECOVERY: copied but source delete failed");
+                log("MOVE RECOVERY: copied but tmp delete failed");
             }
 
             log("MOVE RECOVERY OK: " + source + " -> " + target
                     + " bytes=" + target.length());
-            return target.isFile() && target.length() > 0;
+            return true;
         } catch (Throwable e) {
             log("MOVE RECOVERY FAILED: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
