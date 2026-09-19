@@ -9,6 +9,7 @@ import android.util.Log;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Enumeration;
+import android.content.ContentValues;
 
 import dalvik.system.DexFile;
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -476,7 +477,94 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
-    private static void hookPullTaskPipeline(ClassLoader cl) {
+
+    private static void logDatabaseStats(Context context, ClassLoader cl, String stage) {
+        try {
+            Class<?> dbHelperClass = Class.forName(
+                    "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
+                    false, cl);
+            Object helper = XposedHelpers.callStaticMethod(dbHelperClass, "E", context);
+            SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
+                    helper, "getReadableDatabase");
+            Cursor c = null;
+            try {
+                c = db.rawQuery(
+                        "SELECT (SELECT COUNT(*) FROM yellow_page),"
+                                + " (SELECT COUNT(*) FROM phone_lookup),"
+                                + " (SELECT COALESCE(MAX(update_time),0) FROM yellow_page),"
+                                + " (SELECT COALESCE(MAX(last_use_time),0) FROM yellow_page)",
+                        null);
+                if (c.moveToFirst()) {
+                    log("DB STATS " + stage
+                            + ": yellow_page=" + c.getLong(0)
+                            + ", phone_lookup=" + c.getLong(1)
+                            + ", max_update_time=" + c.getLong(2)
+                            + ", max_last_use_time=" + c.getLong(3));
+                }
+            } finally {
+                if (c != null) c.close();
+            }
+        } catch (Throwable e) {
+            log("DB STATS " + stage + " failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void hookYellowPageDatabaseWrites(ClassLoader cl) {
+        try {
+            Class<?> db = Class.forName("android.database.sqlite.SQLiteDatabase", false, cl);
+
+            Method insert = db.getDeclaredMethod(
+                    "insertWithOnConflict", String.class, String.class,
+                    ContentValues.class, Integer.TYPE);
+            XposedBridge.hookMethod(insert, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    String table = String.valueOf(param.args[0]);
+                    if ("yellow_page".equals(table) || "phone_lookup".equals(table)) {
+                        ContentValues values = (ContentValues) param.args[2];
+                        log("DB WRITE INSERT: table=" + table
+                                + ", values=" + String.valueOf(values));
+                    }
+                }
+            });
+
+            Method update = db.getDeclaredMethod(
+                    "updateWithOnConflict", String.class, ContentValues.class,
+                    String.class, String[].class, Integer.TYPE);
+            XposedBridge.hookMethod(update, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    String table = String.valueOf(param.args[0]);
+                    if ("yellow_page".equals(table) || "phone_lookup".equals(table)) {
+                        ContentValues values = (ContentValues) param.args[1];
+                        log("DB WRITE UPDATE: table=" + table
+                                + ", where=" + String.valueOf(param.args[2])
+                                + ", values=" + String.valueOf(values));
+                    }
+                }
+            });
+
+            Method delete = db.getDeclaredMethod(
+                    "delete", String.class, String.class, String[].class);
+            XposedBridge.hookMethod(delete, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    String table = String.valueOf(param.args[0]);
+                    if ("yellow_page".equals(table) || "phone_lookup".equals(table)) {
+                        log("DB WRITE DELETE: table=" + table
+                                + ", where=" + String.valueOf(param.args[1]));
+                    }
+                }
+            });
+
+            log("hooked YellowPage SQLite write methods");
+        } catch (Throwable e) {
+            log("YellowPage SQLite write hook failed: "
+                    + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void hookPullTaskPipeline(ClassLoader cl, Context context) {
         try {
             // Job 0 does not call PullTask.y() directly. The real chain is:
             // YellowPageJobService -> job.a.c(Context) -> n0.C0372d.a(...)
@@ -488,10 +576,16 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
                         log("PullPipeline ENTER: job.a.c(Context)");
+                        Context ctx = param.args[0] instanceof Context
+                                ? (Context) param.args[0] : context;
+                        logDatabaseStats(ctx, cl, "BEFORE_SYNC");
                     }
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         log("PullPipeline RESULT: job.a.c(Context)=" + String.valueOf(param.getResult()));
+                        Context ctx = param.args[0] instanceof Context
+                                ? (Context) param.args[0] : context;
+                        logDatabaseStats(ctx, cl, "AFTER_SYNC");
                     }
                 });
                 log("hooked PullPipeline: com.miui.yellowpage.job.a.c(Context)");
@@ -746,7 +840,8 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPagePullTask(cl, context);
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
-                            hookPullTaskPipeline(cl);
+                            hookYellowPageDatabaseWrites(cl);
+                            hookPullTaskPipeline(cl, context);
                             hookMeteredNetworkGuard(cl);
                             hookJobDispatcher(cl, context);
                             importYellowPageData(cl, context, dbHelperClass);
