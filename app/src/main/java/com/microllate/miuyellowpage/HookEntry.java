@@ -87,82 +87,30 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
-private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
+    private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         try {
-            if (context == null) {
-                log("PullTask scan skipped: context=null");
+            Class<?> cls = Class.forName("o0.g", false, cl);
+            for (Method method : cls.getDeclaredMethods()) {
+                Class<?>[] p = method.getParameterTypes();
+                if (!"y".equals(method.getName())
+                        || method.getReturnType() != Boolean.TYPE
+                        || p.length != 1
+                        || p[0] != Context.class) continue;
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        if (!param.hasThrowable() && Boolean.FALSE.equals(param.getResult())) {
+                            param.setResult(true);
+                        }
+                    }
+                });
+                log("PullTask gate hooked: o0.g.y(Context)");
                 return;
             }
-
-            int found = 0;
-            java.util.ArrayList<String> paths = new java.util.ArrayList<>();
-            paths.add(context.getApplicationInfo().sourceDir);
-            String[] splits = context.getApplicationInfo().splitSourceDirs;
-            if (splits != null) {
-                for (String split : splits) {
-                    if (split != null && !paths.contains(split)) {
-                        paths.add(split);
-                    }
-                }
-            }
-
-            for (String apkPath : paths) {
-                DexFile dex = new DexFile(apkPath);
-                try {
-                    Enumeration<String> entries = dex.entries();
-                    while (entries.hasMoreElements()) {
-                        String name = entries.nextElement();
-                        if (name.indexOf('.') < 0) {
-                            continue;
-                        }
-
-                        try {
-                            Class<?> candidate = Class.forName(name, false, cl);
-                            for (Method method : candidate.getDeclaredMethods()) {
-                                Class<?>[] p = method.getParameterTypes();
-                                if (!"y".equals(method.getName())
-                                        || method.getReturnType() != Boolean.TYPE
-                                        || p.length != 1
-                                        || p[0] != Context.class) {
-                                    continue;
-                                }
-
-                                final String className = candidate.getName();
-                                XposedBridge.hookMethod(method, new XC_MethodHook() {
-                                    @Override
-                                    protected void beforeHookedMethod(MethodHookParam param) {
-                                        log("PullTask candidate ENTER: "
-                                                + className + ".y(Context)");
-                                    }
-
-                                    @Override
-                                    protected void afterHookedMethod(MethodHookParam param) {
-                                        log("PullTask candidate RESULT: "
-                                                + className + ".y(Context)=" + param.getResult());
-                                    }
-                                });
-                                found++;
-                                log("hooked PullTask candidate: "
-                                        + className + ".y(Context)");
-                            }
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                } finally {
-                    dex.close();
-                }
-            }
-
-            if (found == 0) {
-                log("PullTask candidate y(Context):boolean not found");
-            } else {
-                log("PullTask candidate hooks installed: " + found);
-            }
+            log("PullTask gate o0.g.y(Context) not found");
         } catch (Throwable e) {
-            log("PullTask scan failed: " + e.getClass().getSimpleName());
+            log("PullTask gate hook failed: " + e.getClass().getSimpleName());
         }
     }
-
 
     private static void hookJobDispatcher(ClassLoader cl, Context context) {
         try {
