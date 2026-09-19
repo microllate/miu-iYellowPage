@@ -237,8 +237,8 @@ public class HookEntry implements IXposedHookLoadPackage {
         hookContactsMethod(cl, "com.android.contacts.detail.ContactLoaderFragment$YellowPageLoader", "run");
         hookContactsMethod(cl, "com.android.contacts.activities.UnknownContactActivity$2", "b0");
         hookContactsMethod(cl, "com.android.contacts.fragment.UnknownContactAtyFragment$5", "b0");
-        hookContactsMethod(cl, "com.android.contacts.activities.QuickContactActivity$3", "b");
-        hookContactsMethod(cl, "com.android.contacts.activities.QuickContactActivity", "O1");
+        hookContactsMethod(cl, "com.android.contacts.quickcontact.QuickContactActivity$3", "b");
+        hookContactsMethod(cl, "com.android.contacts.quickcontact.QuickContactActivity", "O1");
         XposedBridge.log(TAG + "CONTACTS exact Yellow Page caller hooks installed");
 
         // Trace the Contacts-side proxy calls. Do not change any result here.
@@ -275,6 +275,23 @@ public class HookEntry implements IXposedHookLoadPackage {
                 }
             }
             XposedBridge.log(TAG + "CONTACTS YellowPageProxy j/r/q/o/p hooks installed");
+            try {
+                Method rMethod = null;
+                for (Method m : proxy.getDeclaredMethods()) {
+                    if ("r".equals(m.getName())) { rMethod = m; break; }
+                }
+                if (rMethod != null) {
+                    XposedBridge.hookMethod(rMethod, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            XposedBridge.log(TAG + "CONTACTS YellowPageProxy.r() STACK\\n"
+                                    + android.util.Log.getStackTraceString(new Throwable()));
+                        }
+                    });
+                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy.r() stack hook installed");
+                }
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "CONTACTS YellowPageProxy.r() stack hook failed: " + t);
+            }
         } catch (Throwable t) {
             XposedBridge.log(TAG + "CONTACTS YellowPageProxy hook failed: " + t);
         }
