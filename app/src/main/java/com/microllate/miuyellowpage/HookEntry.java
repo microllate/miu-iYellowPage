@@ -423,50 +423,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         return out.toString();
     }
 
-    private static final java.util.HashSet<String> HOOKED_HTTP_CLASSES = new java.util.HashSet<String>();
-
-    private static void hookHttpConnection(Object target) {
-        try {
-            if (!(target instanceof java.net.HttpURLConnection)) return;
-            Class<?> cls = target.getClass();
-            if (!HOOKED_HTTP_CLASSES.add(cls.getName())) return;
-            log("HTTP TRACE target: " + cls.getName());
-
-            Method[] methods = cls.getMethods();
-            for (Method method : methods) {
-                String n = method.getName();
-                if (!"connect".equals(n) && !"getResponseCode".equals(n)
-                        && !"getResponseMessage".equals(n) && !"getInputStream".equals(n)
-                        && !"getErrorStream".equals(n) && !"getContentType".equals(n)
-                        && !"getContentLength".equals(n) && !"getContentLengthLong".equals(n)
-                        && !"getHeaderFields".equals(n)) continue;
-                if (method.getDeclaringClass() == Object.class) continue;
-                try {
-                    final Method hookMethod = method;
-                    XposedBridge.hookMethod(hookMethod, new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam p) {
-                            log("HTTP TRACE ENTER: " + hookMethod.getName());
-                        }
-                        @Override protected void afterHookedMethod(MethodHookParam p) {
-                            if (p.hasThrowable()) {
-                                Throwable t=p.getThrowable();
-                                log("HTTP TRACE THROW: " + hookMethod.getName() + " "
-                                        + t.getClass().getName() + ": " + t.getMessage());
-                                return;
-                            }
-                            Object r=p.getResult();
-                            String s=String.valueOf(r);
-                            if (s.length()>1200) s=s.substring(0,1200);
-                            log("HTTP TRACE RESULT: " + hookMethod.getName() + "=" + s);
-                        }
-                    });
-                } catch (Throwable ignored) {}
-            }
-        } catch (Throwable e) {
-            log("HTTP TRACE hook failed: " + e.getClass().getSimpleName());
-        }
-    }
-
     private static void hookReturnedPullObject(Object target) {
         try {
             final Class<?> cls = target.getClass();
@@ -494,7 +450,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             if (text.length() > 500) text = text.substring(0, 500);
                             log("PullTask returned RESULT: " + methodName + "=" + text);
                             if ("d".equals(methodName) && param.getResult() != null) {
-                                hookHttpConnection(param.getResult());
                                 hookReturnedPullObject(param.getResult());
                             }
                         }
@@ -1043,3 +998,110 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             Context context = (Context) XposedHelpers.callMethod(
                                     param.thisObject, "getContext");
                             Object helper = XposedHelpers.callStaticMethod(
+                                    dbHelperClass, "E", context);
+                            SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
+                                    helper, "getReadableDatabase");
+
+                            String number = uri.getLastPathSegment();
+                            String normalized = number;
+
+                            try {
+                                Class<?> normalizer = Class.forName(
+                                        "p022h0.e", false, cl);
+                                normalized = (String) XposedHelpers.callStaticMethod(
+                                        normalizer, "a", context, number);
+                            } catch (Throwable ignored) {
+                            }
+
+                            String table =
+                                    "((SELECT yid AS yellowpage_id, photo_url,thumbnail_url,tag,"
+                                    + "yellow_page_name,yellow_page_name_pinyin,tag_pinyin,number,"
+                                    + "normalized_number,min_match,hide,suspect,call_menu,t9_rank,"
+                                    + "atd_category_id,atd_count,atd_provider,flag,slogan,credit_img,"
+                                    + "number_type,provider_id FROM phone_lookup WHERE normalized_number = ?)"
+                                    + " INNER JOIN yellow_page ON yellowpage_id = yid)";
+
+                            Cursor recovery = db.query(
+                                    table, null, null, new String[]{normalized},
+                                    null, null, "update_time desc");
+
+                            if (recovery == null || !recovery.moveToFirst()) {
+                                if (recovery != null) {
+                                    recovery.close();
+                                }
+                                return;
+                            }
+
+                            String[] columns = recovery.getColumnNames();
+                            MatrixCursor matrix =
+                                    new MatrixCursor(columns, recovery.getCount());
+                            recovery.moveToPosition(-1);
+
+                            while (recovery.moveToNext()) {
+                                Object[] row = new Object[columns.length];
+                                for (int i = 0; i < columns.length; i++) {
+                                    copyCursorValue(recovery, i, row);
+                                }
+                                matrix.addRow(row);
+                            }
+
+                            int count = matrix.getCount();
+                            recovery.close();
+                            param.setResult(matrix);
+                            log("fallback lookup: " + number + " -> " + count + " row(s)");
+                        } catch (Throwable e) {
+                            log("fallback query failed: "
+                                    + e.getClass().getSimpleName());
+                        }
+                    }
+                });
+
+        log("YellowPageProvider hooks installed");
+    }
+
+    @Override
+    public void handleLoadPackage(
+            final XC_LoadPackage.LoadPackageParam lpparam) {
+        if ("com.android.contacts".equals(lpparam.packageName)) {
+            log("loaded in Contacts");
+            hookContactsGate(lpparam.classLoader, "i");
+            hookContactsGate(lpparam.classLoader, "j");
+            return;
+        }
+
+        if (!YELLOWPAGE.equals(lpparam.packageName)) {
+            return;
+        }
+
+        log("loaded in YellowPage");
+
+        try {
+            ClassLoader cl = lpparam.classLoader;
+
+            hookBooleanContextMethod(
+                    cl, "miui.yellowpage.YellowPageUtils",
+                    "isYellowPageAvailable");
+            hookBooleanContextMethod(
+                    cl, "miui.yellowpage.YellowPageUtils",
+                    "isYellowPageEnable");
+            hookYellowPageSyncGate(cl);
+            // Install the metered-network bypass immediately when Yellow Page loads,
+            // before Provider/JobService can start the pull pipeline.
+            hookMeteredNetworkGuard(cl);
+            // JobDispatcher is installed after a real application/provider context exists.
+            // The provider hook below also ensures the EEA pull-task gate is restored.
+            // Application context can be null this early in Zygote package loading.
+            // The provider hook below scans after a real YellowPage Context exists.
+            log("PullTask scan deferred until YellowPageProvider.onCreate");
+
+            Class<?> dbHelperClass = Class.forName(
+                    "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
+                    false, cl);
+
+            installProviderHooks(cl, dbHelperClass);
+        } catch (Throwable e) {
+            log("YellowPage initialization failed: "
+                    + e.getClass().getSimpleName());
+        }
+    }
+}
