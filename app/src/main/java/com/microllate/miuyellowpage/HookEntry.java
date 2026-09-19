@@ -636,9 +636,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     protected void beforeHookedMethod(MethodHookParam param) {
                         log("PullTask returned ENTER: " + cls.getName() + "." + methodName
                                 + " args=" + formatHookArgs(param.args));
-                        if ("u".equals(methodName) && param.args != null && param.args.length == 0) {
-                            probeHNetworkCall(param.thisObject);
-                        }
                     }
 
                     @Override
@@ -1315,6 +1312,57 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+    private static void hookYellowPageNetworkGates(ClassLoader cl) {
+        try {
+            Class<?> permission = Class.forName("miui.yellowpage.Permission", false, cl);
+            for (Method method : permission.getDeclaredMethods()) {
+                if (!"networkingAllowed".equals(method.getName())
+                        || method.getParameterTypes().length != 1
+                        || method.getParameterTypes()[0] != Context.class
+                        || method.getReturnType() != Boolean.TYPE
+                        || !Modifier.isStatic(method.getModifiers())) {
+                    continue;
+                }
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        log("NETWORK GATE: Permission.networkingAllowed -> "
+                                + String.valueOf(param.getResult()));
+                    }
+                });
+                log("hooked NETWORK GATE: Permission.networkingAllowed(Context)");
+            }
+        } catch (Throwable e) {
+            log("NETWORK GATE Permission hook failed: " + e.getClass().getSimpleName());
+        }
+
+        try {
+            Class<?> q = Class.forName("Q", false, cl);
+            int found = 0;
+            for (Method method : q.getDeclaredMethods()) {
+                if (!"a".equals(method.getName())
+                        || method.getParameterTypes().length != 1
+                        || method.getParameterTypes()[0] != Context.class
+                        || method.getReturnType() != Boolean.TYPE
+                        || !Modifier.isStatic(method.getModifiers())) {
+                    continue;
+                }
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        log("NETWORK GATE: Q.a(Context) -> "
+                                + String.valueOf(param.getResult()));
+                    }
+                });
+                found++;
+            }
+            log("hooked NETWORK GATE: Q.a(Context) count=" + found);
+        } catch (Throwable e) {
+            log("NETWORK GATE Q hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+
     private static void hookYellowPageResponseParser(ClassLoader cl) {
         try {
             Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
@@ -1816,6 +1864,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
                             hookYellowPageHttpDecision(cl);
+                            hookYellowPageNetworkGates(cl);
                             hookYellowPageResponseParser(cl);
                             hookYellowPageResponseSurface(cl);
                             hookYellowPageStreamRequest(cl);
