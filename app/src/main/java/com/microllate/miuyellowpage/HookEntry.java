@@ -559,6 +559,9 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 Object result = param.getResult();
                                 log("HTTP request B RESULT: " + String.valueOf(result)
                                         + " class=" + (result == null ? "null" : result.getClass().getName()));
+                                if (result != null) {
+                                    hookReturnedPullObject(result);
+                                }
                             }
                         }
                     });
