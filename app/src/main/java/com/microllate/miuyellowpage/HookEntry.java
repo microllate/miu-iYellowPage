@@ -487,6 +487,62 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookYellowPageResponseBodyCapture(Object connection) {
+        try {
+            if (!(connection instanceof java.net.HttpURLConnection)) return;
+            java.net.HttpURLConnection http = (java.net.HttpURLConnection) connection;
+            final String url;
+            try { url = String.valueOf(http.getURL()); } catch (Throwable e) { return; }
+            if (!(url.contains("api.comm.miui.com/cspmisc/patch/info")
+                    || url.contains("global.api.huangye.miui.com/spbook/atd/v2/cat_sync")
+                    || url.contains("global.api.huangye.miui.com/spbook/yellowpage/provider/info"))) {
+                return;
+            }
+            Class<?> cls = connection.getClass();
+            for (Method m : cls.getMethods()) {
+                if (!"getInputStream".equals(m.getName()) || m.getParameterTypes().length != 0) continue;
+                try {
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable() || !(param.getResult() instanceof java.io.InputStream)) return;
+                            java.io.InputStream in = (java.io.InputStream) param.getResult();
+                            try {
+                                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                                byte[] buf = new byte[4096];
+                                int total = 0;
+                                int n;
+                                while (total < 65536 && (n = in.read(buf, 0, Math.min(buf.length, 65536 - total))) > 0) {
+                                    out.write(buf, 0, n);
+                                    total += n;
+                                }
+                                byte[] data = out.toByteArray();
+                                String body;
+                                try {
+                                    body = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+                                } catch (Throwable e) {
+                                    body = java.util.Arrays.toString(data);
+                                }
+                                if (body.length() > 12000) body = body.substring(0, 12000);
+                                log("HTTP BODY CAPTURE URL: " + url);
+                                log("HTTP BODY CAPTURE BYTES: " + data.length);
+                                log("HTTP BODY CAPTURE TEXT: " + body);
+                            } catch (Throwable e) {
+                                log("HTTP BODY CAPTURE THROW: " + e.getClass().getName() + ": " + e.getMessage());
+                            }
+                        }
+                    });
+                    log("HTTP BODY CAPTURE HOOKED: " + cls.getName() + ".getInputStream()");
+                } catch (Throwable e) {
+                    log("HTTP BODY CAPTURE HOOK FAILED: " + e.getClass().getName());
+                }
+            }
+        } catch (Throwable e) {
+            log("HTTP BODY CAPTURE INSTALL FAILED: " + e.getClass().getName() + ": " + e.getMessage());
+        }
+    }
+
     private static void hookHConnectionResponse(java.net.HttpURLConnection connection) {
         try {
             if (connection == null) {
@@ -707,6 +763,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                     // Install hooks on the exact concrete connection
                                     // object/class returned by the real j0.d() call.
                                     hookConcreteHttpResponse(connection);
+                            hookYellowPageResponseBodyCapture(connection);
                                     hookHConnectionResponse(connection);
                                 }
                             }
