@@ -389,6 +389,82 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookPullTaskPipeline(ClassLoader cl) {
+        try {
+            // Job 0 does not call PullTask.y() directly. The real chain is:
+            // YellowPageJobService -> job.a.c(Context) -> n0.C0372d.a(...)
+            // -> AbstractC0381d.z(...) -> concrete PullTask.y(Context).
+            try {
+                Class<?> jobManager = Class.forName("com.miui.yellowpage.job.a", false, cl);
+                Method cMethod = jobManager.getDeclaredMethod("c", Context.class);
+                XposedBridge.hookMethod(cMethod, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("PullPipeline ENTER: job.a.c(Context)");
+                    }
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        log("PullPipeline RESULT: job.a.c(Context)=" + String.valueOf(param.getResult()));
+                    }
+                });
+                log("hooked PullPipeline: com.miui.yellowpage.job.a.c(Context)");
+            } catch (Throwable e) {
+                log("PullPipeline job.a hook failed: " + e.getClass().getSimpleName());
+            }
+
+            try {
+                Class<?> daemon = Class.forName("n0.C0372d", false, cl);
+                for (Method method : daemon.getDeclaredMethods()) {
+                    Class<?>[] p = method.getParameterTypes();
+                    if (!"a".equals(method.getName())
+                            || p.length != 2
+                            || p[0] != Context.class) {
+                        continue;
+                    }
+                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            log("PullPipeline ENTER: n0.C0372d.a(Context,...)");
+                        }
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            log("PullPipeline EXIT: n0.C0372d.a(Context,...)");
+                        }
+                    });
+                    log("hooked PullPipeline: n0.C0372d.a");
+                }
+            } catch (Throwable e) {
+                log("PullPipeline daemon hook failed: " + e.getClass().getSimpleName());
+            }
+
+            try {
+                Class<?> base = Class.forName("o0.AbstractC0381d", false, cl);
+                Method zMethod = base.getDeclaredMethod(
+                        "z", Context.class, String.class, Long.TYPE, Boolean.TYPE);
+                XposedBridge.hookMethod(zMethod, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("PullPipeline ENTER: AbstractC0381d.z(Context,String,long,boolean) "
+                                + "class=" + param.thisObject.getClass().getName());
+                    }
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        log("PullPipeline EXIT: AbstractC0381d.z class="
+                                + param.thisObject.getClass().getName());
+                    }
+                });
+                log("hooked PullPipeline: o0.AbstractC0381d.z");
+            } catch (Throwable e) {
+                log("PullPipeline AbstractC0381d.z hook failed: "
+                        + e.getClass().getSimpleName());
+            }
+        } catch (Throwable e) {
+            log("PullPipeline hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+
     private static void hookContactsGate(
             ClassLoader cl, String methodName) {
         try {
@@ -584,6 +660,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPagePullTask(cl, context);
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
+                            hookPullTaskPipeline(cl);
                             hookJobDispatcher(cl, context);
                             importYellowPageData(cl, context, dbHelperClass);
                         } catch (Throwable e) {
