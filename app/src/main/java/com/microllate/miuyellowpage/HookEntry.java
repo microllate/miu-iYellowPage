@@ -1628,29 +1628,123 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 XposedBridge.hookMethod(target, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
-                        try {
-                            log("DOWNLOAD ENTER: o0.d.p args=" + formatHookArgs(param.args));
-                        } catch (Throwable e) {
-                            log("DOWNLOAD ENTER log failed: " + e.getClass().getSimpleName());
-                        }
+                        log("DOWNLOAD ENTER: o0.d.p args=" + formatHookArgs(param.args));
                     }
-
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         if (param.hasThrowable()) {
                             Throwable t = param.getThrowable();
                             log("DOWNLOAD THROW: o0.d.p " + t.getClass().getName()
                                     + ": " + String.valueOf(t.getMessage()));
+                            Throwable c = t.getCause();
+                            int depth = 0;
+                            while (c != null && depth++ < 5) {
+                                log("DOWNLOAD CAUSE[" + depth + "]: " + c.getClass().getName()
+                                        + ": " + String.valueOf(c.getMessage()));
+                                c = c.getCause();
+                            }
                         } else {
-                            Object r = param.getResult();
-                            log("DOWNLOAD RESULT: o0.d.p -> " + String.valueOf(r));
+                            log("DOWNLOAD RESULT: o0.d.p -> " + String.valueOf(param.getResult()));
                         }
                     }
                 });
                 found++;
-                log("hooked DOWNLOAD: " + target);
             }
-            log("DOWNLOAD hooks installed=" + found);
+            log("DOWNLOAD o0.d.p hooks installed=" + found);
+
+            // o0.d.p wraps the underlying transport exception as a generic
+            // "failed to download file". Hook URL.openConnection and the
+            // connection surface to expose the real CDN failure.
+            Class<?> url = Class.forName("java.net.URL", false, ClassLoader.getSystemClassLoader());
+            for (Method method : url.getDeclaredMethods()) {
+                if (!"openConnection".equals(method.getName())) continue;
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            Object u = param.thisObject;
+                            String text = String.valueOf(u);
+                            if (text.contains("yp_spam") || text.contains("yellowpage")) {
+                                log("DOWNLOAD URL.OPEN: " + text);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            log("DOWNLOAD URL.OPEN THROW: "
+                                    + param.getThrowable().getClass().getName() + ": "
+                                    + String.valueOf(param.getThrowable().getMessage()));
+                            return;
+                        }
+                        Object r = param.getResult();
+                        if (r != null) {
+                            String text = String.valueOf(r);
+                            if (text.contains("yp_spam") || text.contains("yellowpage")) {
+                                log("DOWNLOAD URL.OPEN RESULT: " + r.getClass().getName());
+                            }
+                        }
+                    }
+                });
+            }
+            log("DOWNLOAD java.net.URL.openConnection hooks installed");
+
+            Class<?> uc = Class.forName("java.net.URLConnection", false,
+                    ClassLoader.getSystemClassLoader());
+            String[] names = new String[]{"connect", "getInputStream", "getResponseCode",
+                    "getContentLength", "getContentLengthLong"};
+            int connectionHooks = 0;
+            Class<?> current = uc;
+            while (current != null) {
+                for (Method method : current.getDeclaredMethods()) {
+                    boolean match = false;
+                    for (String name : names) {
+                        if (name.equals(method.getName())) {
+                            match = true;
+                            break;
+                        }
+                    }
+                    if (!match) continue;
+                    final Method target = method;
+                    XposedBridge.hookMethod(target, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            try {
+                                String u = String.valueOf(param.thisObject);
+                                if (u.contains("yp_spam") || u.contains("yellowpage")) {
+                                    log("DOWNLOAD HTTP ENTER: " + target.getName()
+                                            + " class=" + param.thisObject.getClass().getName()
+                                            + " url=" + u);
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            try {
+                                String u = String.valueOf(param.thisObject);
+                                if (!(u.contains("yp_spam") || u.contains("yellowpage"))) return;
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("DOWNLOAD HTTP THROW: " + target.getName() + " "
+                                            + t.getClass().getName() + ": "
+                                            + String.valueOf(t.getMessage()));
+                                    Throwable cause = t.getCause();
+                                    if (cause != null) {
+                                        log("DOWNLOAD HTTP CAUSE: " + cause.getClass().getName()
+                                                + ": " + String.valueOf(cause.getMessage()));
+                                    }
+                                } else {
+                                    log("DOWNLOAD HTTP RESULT: " + target.getName()
+                                            + " -> " + String.valueOf(param.getResult()));
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    });
+                    connectionHooks++;
+                }
+                current = current.getSuperclass();
+            }
+            log("DOWNLOAD URLConnection hooks installed=" + connectionHooks);
         } catch (Throwable e) {
             log("DOWNLOAD hook failed: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
