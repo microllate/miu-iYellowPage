@@ -764,15 +764,19 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     if (value == -1) {
                         try {
                             StackTraceElement[] trace = Thread.currentThread().getStackTrace();
-                            StringBuilder stack = new StringBuilder("J0.K SET -1 STACK:");
+                            log("J0.K SET -1 STACK BEGIN thread="
+                                    + Thread.currentThread().getName()
+                                    + " object="
+                                    + (param.thisObject == null ? "null"
+                                    : param.thisObject.getClass().getName()));
                             int count = 0;
                             for (StackTraceElement element : trace) {
                                 String frame = String.valueOf(element);
                                 if (frame.contains("HookEntry")) continue;
-                                stack.append(" | ").append(frame);
-                                if (++count >= 8) break;
+                                log("J0.K SET -1 STACK[" + count + "]: " + frame);
+                                if (++count >= 30) break;
                             }
-                            log(stack.toString());
+                            log("J0.K SET -1 STACK END");
                         } catch (Throwable ignored) {
                         }
                     }
