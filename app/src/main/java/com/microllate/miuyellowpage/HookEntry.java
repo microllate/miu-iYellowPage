@@ -4,6 +4,7 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.util.Log;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -18,6 +19,11 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String YELLOWPAGE = "com.miui.yellowpage";
+    private static final String TAG = "miu-iYellowPage";
+
+    private static void log(String message) {
+        Log.i(TAG, message);
+    }
 
     private static void hookBooleanContextMethod(
             ClassLoader cl, String className, String methodName) {
@@ -36,8 +42,11 @@ public class HookEntry implements IXposedHookLoadPackage {
                         param.setResult(true);
                     }
                 });
+                log("hooked " + className + "." + methodName + "(Context)");
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable e) {
+            log("hook failed " + className + "." + methodName + ": "
+                    + e.getClass().getSimpleName());
         }
     }
 
@@ -59,8 +68,11 @@ public class HookEntry implements IXposedHookLoadPackage {
                         param.setResult(true);
                     }
                 });
+                log("hooked Contacts YellowPageProxy." + methodName + "(Context)");
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable e) {
+            log("Contacts hook failed " + methodName + ": "
+                    + e.getClass().getSimpleName());
         }
     }
 
@@ -117,6 +129,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                         }
                     });
         }
+        log("preset hooks installed: " + preset.getName());
     }
 
     private static void installPresetHooks(
@@ -127,7 +140,6 @@ public class HookEntry implements IXposedHookLoadPackage {
                 hookPresetProviderClass(preset, context);
                 return;
             } catch (Throwable ignored) {
-                // Current build uses r0.c, but R8 can rename this class.
                 // Fall through to the lazy shape-based scan.
             }
 
@@ -153,7 +165,9 @@ public class HookEntry implements IXposedHookLoadPackage {
             } finally {
                 dex.close();
             }
-        } catch (Throwable ignored) {
+            log("preset provider class not found");
+        } catch (Throwable e) {
+            log("preset hook install failed: " + e.getClass().getSimpleName());
         }
     }
 
@@ -171,6 +185,8 @@ public class HookEntry implements IXposedHookLoadPackage {
                         "SELECT (SELECT COUNT(*) FROM yellow_page),"
                                 + " (SELECT COUNT(*) FROM phone_lookup)", null);
                 if (c.moveToFirst() && c.getInt(0) > 0 && c.getInt(1) > 0) {
+                    log("database ready; yellow_page=" + c.getInt(0)
+                            + ", phone_lookup=" + c.getInt(1));
                     return;
                 }
             } finally {
@@ -179,10 +195,13 @@ public class HookEntry implements IXposedHookLoadPackage {
                 }
             }
 
+            log("database incomplete; importing preset data");
             installPresetHooks(cl, context);
             XposedHelpers.callMethod(helper, "L", db);
             XposedHelpers.callMethod(helper, "N", context, db);
-        } catch (Throwable ignored) {
+            log("preset import requested");
+        } catch (Throwable e) {
+            log("preset import failed: " + e.getClass().getSimpleName());
         }
     }
 
@@ -222,8 +241,11 @@ public class HookEntry implements IXposedHookLoadPackage {
                         try {
                             Context context = (Context) XposedHelpers.callMethod(
                                     param.thisObject, "getContext");
+                            log("YellowPageProvider.onCreate");
                             importYellowPageData(cl, context, dbHelperClass);
-                        } catch (Throwable ignored) {
+                        } catch (Throwable e) {
+                            log("provider onCreate hook failed: "
+                                    + e.getClass().getSimpleName());
                         }
                     }
                 });
@@ -313,18 +335,25 @@ public class HookEntry implements IXposedHookLoadPackage {
                                 matrix.addRow(row);
                             }
 
+                            int count = matrix.getCount();
                             recovery.close();
                             param.setResult(matrix);
-                        } catch (Throwable ignored) {
+                            log("fallback lookup: " + number + " -> " + count + " row(s)");
+                        } catch (Throwable e) {
+                            log("fallback query failed: "
+                                    + e.getClass().getSimpleName());
                         }
                     }
                 });
+
+        log("YellowPageProvider hooks installed");
     }
 
     @Override
     public void handleLoadPackage(
             final XC_LoadPackage.LoadPackageParam lpparam) {
         if ("com.android.contacts".equals(lpparam.packageName)) {
+            log("loaded in Contacts");
             hookContactsGate(lpparam.classLoader, "i");
             hookContactsGate(lpparam.classLoader, "j");
             return;
@@ -333,6 +362,8 @@ public class HookEntry implements IXposedHookLoadPackage {
         if (!YELLOWPAGE.equals(lpparam.packageName)) {
             return;
         }
+
+        log("loaded in YellowPage");
 
         try {
             ClassLoader cl = lpparam.classLoader;
@@ -349,7 +380,9 @@ public class HookEntry implements IXposedHookLoadPackage {
                     false, cl);
 
             installProviderHooks(cl, dbHelperClass);
-        } catch (Throwable ignored) {
+        } catch (Throwable e) {
+            log("YellowPage initialization failed: "
+                    + e.getClass().getSimpleName());
         }
     }
 }
