@@ -2100,14 +2100,28 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             if (param.hasThrowable()) {
-                                log("POST PIPE THROW: " + methodName + " "
-                                        + param.getThrowable().getClass().getSimpleName());
+                                Throwable t = param.getThrowable();
+                                log("POST PIPE THROW: " + methodName);
+                                log("POST PIPE THROW CLASS: " + t.getClass().getName());
+                                log("POST PIPE THROW MESSAGE: " + String.valueOf(t.getMessage()));
+                                Throwable cause = t.getCause();
+                                if (cause != null) {
+                                    log("POST PIPE THROW CAUSE: " + cause.getClass().getName()
+                                            + ": " + String.valueOf(cause.getMessage()));
+                                }
+                                StackTraceElement[] trace = t.getStackTrace();
+                                int limit = Math.min(trace == null ? 0 : trace.length, 30);
+                                for (int i = 0; i < limit; i++) {
+                                    log("POST PIPE THROW STACK[" + i + "]: " + String.valueOf(trace[i]));
+                                }
                             } else {
+                                Object result = param.getResult();
                                 log("POST PIPE RESULT: " + methodName
-                                        + " -> " + String.valueOf(param.getResult())
-                                        + " class=" + (param.getResult() == null
-                                        ? "null" : param.getResult().getClass().getName()));
+                                        + " -> " + String.valueOf(result)
+                                        + " class=" + (result == null
+                                        ? "null" : result.getClass().getName()));
                             }
+
                         }
                     });
                     hooked++;
