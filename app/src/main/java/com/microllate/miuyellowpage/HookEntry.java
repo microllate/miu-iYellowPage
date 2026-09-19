@@ -1705,6 +1705,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                         }
                     }
                     if (!match) continue;
+                    if (Modifier.isAbstract(method.getModifiers())) continue;
                     final Method target = method;
                     XposedBridge.hookMethod(target, new XC_MethodHook() {
                         @Override
