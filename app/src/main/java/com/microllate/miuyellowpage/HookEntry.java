@@ -4,11 +4,8 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.database.sqlite.SQLiteDatabase;
-import android.app.Application;
-import dalvik.system.DexFile;
 
 import java.lang.reflect.Method;
-import java.util.Enumeration;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -17,679 +14,246 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class HookEntry implements IXposedHookLoadPackage {
-    private static final String TAG = "[miu-iYellowPage] ";
+    private static final String YELLOWPAGE = "com.miui.yellowpage";
 
-    private static void diagnoseYellowPageJoin(SQLiteDatabase db, String number) {
-        Cursor c = null;
-        try {
-            c = db.rawQuery("SELECT yid, content FROM yellow_page WHERE yid=307", null);
-            XposedBridge.log(TAG + "diagnose: yellow_page yid=307 count=" + c.getCount());
-            while (c.moveToNext()) {
-                XposedBridge.log(TAG + "diagnose yellow_page: yid=" + c.getString(0)
-                        + " contentLength=" + (c.isNull(1) ? "null" : c.getString(1).length()));
-            }
-            c.close(); c = null;
-
-            c = db.rawQuery("SELECT pl.number, pl.normalized_number, pl.yid, yp.yid, yp.content "
-                    + "FROM phone_lookup pl LEFT JOIN yellow_page yp ON pl.yid=yp.yid "
-                    + "WHERE pl.number=? OR pl.normalized_number=?", new String[]{number, number});
-            XposedBridge.log(TAG + "diagnose: phone_lookup LEFT JOIN yellow_page for "
-                    + number + " count=" + c.getCount());
-            while (c.moveToNext()) {
-                XposedBridge.log(TAG + "diagnose JOIN row: number=" + c.getString(0)
-                        + " normalized=" + c.getString(1)
-                        + " pl.yid=" + c.getString(2)
-                        + " yp.yid=" + c.getString(3)
-                        + " yp.contentLength=" + (c.isNull(4) ? "null" : c.getString(4).length()));
-            }
-            c.close(); c = null;
-
-            c = db.rawQuery("SELECT COUNT(*) FROM phone_lookup pl INNER JOIN yellow_page yp ON pl.yid=yp.yid "
-                    + "WHERE pl.normalized_number=?", new String[]{number});
-            if (c.moveToFirst()) {
-                XposedBridge.log(TAG + "diagnose: INNER JOIN normalized_number=" + number
-                        + " count=" + c.getInt(0));
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "diagnose JOIN failed: " + t);
-        } finally {
-            if (c != null) try { c.close(); } catch (Throwable ignored) {}
-        }
-    }
-
-    private static void dumpTableCounts(SQLiteDatabase db) {
-        String[] tables = {"provider", "yellow_page", "phone_lookup", "t9_lookup"};
-        for (String table : tables) {
-            Cursor c = null;
-            try {
-                c = db.rawQuery("SELECT COUNT(*) FROM " + table, null);
-                if (c.moveToFirst()) {
-                    XposedBridge.log(TAG + table + " COUNT=" + c.getInt(0));
-                }
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + table + " COUNT FAILED: " + t);
-            } finally {
-                if (c != null) try { c.close(); } catch (Throwable ignored) {}
-            }
-        }
-    }
-
-    private static boolean hasNoArgMethodReturning(Class<?> cls, String name, Class<?> returnType) {
-        try {
-            Method m = cls.getDeclaredMethod(name);
-            return m.getReturnType() == returnType;
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    /*
-     * JADX's p052r0.c is R8-obfuscated at runtime. Find the actual class by
-     * its distinctive method shape instead of relying on the JADX-generated name:
-     *   n() -> singleton of same class
-     *   h() -> int resource id
-     *   d()/f()/i() -> String
-     */
-    private static void findAndHookPresetProvider(final ClassLoader cl, final Context context) {
-        try {
-            String apkPath = context.getApplicationInfo().sourceDir;
-            DexFile dex = new DexFile(apkPath);
-            Enumeration<String> entries = dex.entries();
-            int scanned = 0;
-            int candidates = 0;
-
-            while (entries.hasMoreElements()) {
-                String name = entries.nextElement();
-                scanned++;
-
-                // Only inspect classes with the distinctive no-arg method shape.
-                if (name.indexOf('.') < 0) continue;
-
-                try {
-                    Class<?> cls = Class.forName(name, false, cl);
-
-                    if (!hasNoArgMethodReturning(cls, "h", Integer.TYPE)
-                            || !hasNoArgMethodReturning(cls, "d", String.class)
-                            || !hasNoArgMethodReturning(cls, "f", String.class)
-                            || !hasNoArgMethodReturning(cls, "i", String.class)) {
-                        continue;
-                    }
-
-                    Method n;
-                    try {
-                        n = cls.getDeclaredMethod("n");
-                    } catch (Throwable ignored) {
-                        continue;
-                    }
-
-                    if (n.getReturnType() != cls
-                            || !java.lang.reflect.Modifier.isStatic(n.getModifiers())) {
-                        continue;
-                    }
-
-                    candidates++;
-                    XposedBridge.log(TAG + "preset provider candidate: " + cls.getName());
-
-                    final Class<?> target = cls;
-                    XposedHelpers.findAndHookMethod(
-                            target, "h", new XC_MethodHook() {
-                                @Override
-                                protected void afterHookedMethod(MethodHookParam param) {
-                                    try {
-                                        XposedBridge.log(TAG + "preset h() invoked on " + target.getName());
-                                        int resId = context.getResources().getIdentifier(
-                                                "yellow_pages_cn",
-                                                "raw",
-                                                "com.miui.yellowpage");
-                                        if (resId != 0) {
-                                            int old = (Integer) param.getResult();
-                                            param.setResult(resId);
-                                            XposedBridge.log(TAG + target.getName()
-                                                    + ".h() " + old + " -> " + resId
-                                                    + " (force yellow_pages_cn)");
-                                        } else {
-                                            XposedBridge.log(TAG
-                                                    + "yellow_pages_cn resource NOT FOUND");
-                                        }
-                                    } catch (Throwable t) {
-                                        XposedBridge.log(TAG + "preset h() failed: " + t);
-                                    }
-                                }
-                            });
-                    try {
-                        XposedHelpers.findAndHookMethod(
-                                target.getSuperclass(), "l", Context.class, new XC_MethodHook() {
-                                    @Override protected void beforeHookedMethod(MethodHookParam param) {
-                                        XposedBridge.log(TAG + target.getName() + ".l() ENTER");
-                                    }
-                                    @Override protected void afterHookedMethod(MethodHookParam param) {
-                                        Object old = param.getResult();
-                                        param.setResult(true);
-                                        XposedBridge.log(TAG + target.getName() + ".l() EXIT result="
-                                                + old + " -> FORCED true");
-                                    }
-                                });
-                        XposedBridge.log(TAG + "preset superclass l(Context) hook installed: " + target.getSuperclass().getName());
-                    } catch (Throwable t) {
-                        XposedBridge.log(TAG + "preset superclass l(Context) hook failed: " + t);
-                    }
-
-                    try {
-                        XposedHelpers.findAndHookMethod(
-                                target.getSuperclass(), "c", Context.class, new XC_MethodHook() {
-                                    @Override protected void beforeHookedMethod(MethodHookParam param) {
-                                        XposedBridge.log(TAG + target.getName() + ".c(Context) ENTER");
-                                    }
-                                    @Override protected void afterHookedMethod(MethodHookParam param) {
-                                        XposedBridge.log(TAG + target.getName() + ".c(Context) EXIT result="
-                                                + param.getResult());
-                                    }
-                                });
-                        XposedBridge.log(TAG + "preset superclass c(Context) hook installed: " + target.getSuperclass().getName());
-                    } catch (Throwable t) {
-                        XposedBridge.log(TAG + "preset superclass c(Context) hook failed: " + t);
-                    }
-
-                    XposedBridge.log(TAG + "preset h() hook installed: " + target.getName());
-
-                    // One matching class is expected; stop after the first exact match.
-                    break;
-                } catch (Throwable ignored) {
-                }
-            }
-
-            dex.close();
-
-            XposedBridge.log(TAG + "preset provider scan finished: scanned="
-                    + scanned + " candidates=" + candidates);
-
-            if (candidates == 0) {
-                XposedBridge.log(TAG + "preset provider runtime class NOT FOUND");
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "preset provider scan failed: " + t);
-        }
-    }
-
-
-    /*
-     * Contacts-side tracing. The Yellow Page provider is already known to have
-     * usable data, so this side only answers one question:
-     * does com.android.contacts actually create the loader / call the proxy?
-     */
-    private static void installContactsDiagnostics(final XC_LoadPackage.LoadPackageParam lpparam) {
-        final ClassLoader cl = lpparam.classLoader;
-
-        // Actual Yellow Page entry points found in the CN Contacts smali:
-        // UnknownContactActivity.Y0(number)
-        // UnknownContactAtyFragment.Y2(number)
-        hookContactsTarget(cl, "com.android.contacts.activities.UnknownContactActivity", "Y0");
-        hookContactsTargetNoArgs(cl, "com.android.contacts.activities.UnknownContactActivity", "X0");
-        hookContactsTargetNoArgs(cl, "com.android.contacts.activities.UnknownContactActivity", "Q0");
-        hookContactsTarget(cl, "com.android.contacts.fragment.UnknownContactAtyFragment", "Y2");
-        hookContactsTargetNoArgs(cl, "com.android.contacts.fragment.UnknownContactAtyFragment", "X2");
-
-        // Trace the actual loader creation and its obfuscated load method.
-        hookContactsLoader(cl, "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader");
-
-        // Exact caller chain from the supplied decompiled Contacts source.
-        hookContactsMethod(cl, "com.android.contacts.detail.ContactLoaderFragment$3", "X");
-        hookContactsMethod(cl, "com.android.contacts.detail.ContactLoaderFragment$YellowPageLoader", "run");
-        hookContactsMethod(cl, "com.android.contacts.activities.UnknownContactActivity$2", "b0");
-        hookContactsMethod(cl, "com.android.contacts.fragment.UnknownContactAtyFragment$5", "b0");
-        hookContactsMethod(cl, "com.android.contacts.quickcontact.QuickContactActivity$3", "b");
-        hookContactsMethod(cl, "com.android.contacts.quickcontact.QuickContactActivity", "O1");
-        XposedBridge.log(TAG + "CONTACTS exact Yellow Page caller hooks installed");
-
-        // Trace the Contacts-side proxy calls. Do not change any result here.
-        // PeopleActivity -> TwelveKeyDialerFragment/DialerCallVH reaches YellowPage
-        // through AntiFraudUtils.h() -> YellowPageUtils.getPhoneInfo(). Trace both exact calls.
-        hookContactsMethod(cl, "com.android.contacts.util.AntiFraudUtils", "h");
-        hookContactsMethod(cl, "miui.yellowpage.YellowPageUtils", "getPhoneInfo");
-
-        try {
-            Class<?> proxy = Class.forName("com.android.contacts.util.YellowPageProxy", false, cl);
-            for (Method m : proxy.getDeclaredMethods()) {
-                String n = m.getName();
-                if ("j".equals(n) || "r".equals(n) || "q".equals(n) || "i".equals(n)
-                        || "o".equals(n) || "p".equals(n)) {
-                    XposedBridge.hookMethod(m, new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
-                                    + m.getName() + "() ENTER args="
-                                    + java.util.Arrays.toString(param.args));
-                        }
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            if (param.hasThrowable()) {
-                                XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
-                                        + m.getName() + "() THREW=" + param.getThrowable());
-                            } else {
-                                Object result = param.getResult();
-                                if ("j".equals(m.getName()) || "i".equals(m.getName())) {
-                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy." + m.getName()
-                                            + "() " + String.valueOf(result) + " -> FORCED true");
-                                    param.setResult(true);
-                                } else {
-                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
-                                            + m.getName() + "() EXIT result="
-                                            + String.valueOf(result));
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-            XposedBridge.log(TAG + "CONTACTS YellowPageProxy j/r/q/o/p hooks installed (j/i forced true)");
-            try {
-                Method rMethod = null;
-                for (Method m : proxy.getDeclaredMethods()) {
-                    if ("r".equals(m.getName())) { rMethod = m; break; }
-                }
-                if (rMethod != null) {
-                    XposedBridge.hookMethod(rMethod, new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "CONTACTS YellowPageProxy.r() STACK\\n"
-                                    + android.util.Log.getStackTraceString(new Throwable()));
-                        }
-                    });
-                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy.r() stack hook installed");
-                }
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + "CONTACTS YellowPageProxy.r() stack hook failed: " + t);
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "CONTACTS YellowPageProxy hook failed: " + t);
-        }
-
-        XposedBridge.log(TAG + "CONTACTS targeted diagnostics installed");
-    }
-
-    private static void hookContactsMethod(final ClassLoader cl, final String className, final String methodName) {
+    private static void hookBooleanContextMethod(
+            ClassLoader cl, String className, String methodName) {
         try {
             Class<?> cls = Class.forName(className, false, cl);
-            int count = 0;
-            for (Method m : cls.getDeclaredMethods()) {
-                if (!methodName.equals(m.getName())) continue;
-                count++;
-                final Method target = m;
-                XposedBridge.hookMethod(target, new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam param) {
-                        XposedBridge.log(TAG + "CONTACTS EXACT " + className + "." + methodName
-                                + "() ENTER args=" + java.util.Arrays.toString(param.args));
-                    }
-                    @Override protected void afterHookedMethod(MethodHookParam param) {
-                        if (param.hasThrowable()) {
-                            XposedBridge.log(TAG + "CONTACTS EXACT " + className + "." + methodName
-                                    + "() THREW=" + param.getThrowable());
-                        } else {
-                            XposedBridge.log(TAG + "CONTACTS EXACT " + className + "." + methodName
-                                    + "() EXIT result=" + String.valueOf(param.getResult()));
-                        }
-                    }
-                });
-            }
-            XposedBridge.log(TAG + "CONTACTS EXACT hook " + className + "." + methodName
-                    + " installed methods=" + count);
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "CONTACTS EXACT hook FAILED " + className + "." + methodName + ": " + t);
-        }
-    }
-
-    private static void scanContactsYellowPageCallers(final XC_LoadPackage.LoadPackageParam lpparam) {
-        try {
-            DexFile dex = new DexFile(lpparam.appInfo.sourceDir);
-            Enumeration<String> entries = dex.entries();
-            int found = 0;
-            while (entries.hasMoreElements()) {
-                String name = entries.nextElement();
-                String simple = name.substring(name.lastIndexOf('.') + 1);
-                if (!simple.contains("ContactLoaderFragment")
-                        && !simple.contains("QuickContactActivity")) {
+            for (Method method : cls.getDeclaredMethods()) {
+                if (!methodName.equals(method.getName())
+                        || method.getReturnType() != Boolean.TYPE
+                        || method.getParameterTypes().length != 1
+                        || method.getParameterTypes()[0] != Context.class) {
                     continue;
                 }
-                found++;
-                XposedBridge.log(TAG + "CONTACTS caller candidate=" + name);
-                try {
-                    Class<?> cls = Class.forName(name, false, lpparam.classLoader);
-                    for (Method m : cls.getDeclaredMethods()) {
-                        String n = m.getName();
-                        if ("onCreate".equals(n) || "onCreateLoader".equals(n)
-                                || "onLoadFinished".equals(n) || "onLoaderReset".equals(n)
-                                || "load".equals(n) || "loadInBackground".equals(n)
-                                || "J".equals(n) || "r".equals(n)) {
-                            final String methodName = n;
-                            XposedBridge.hookMethod(m, new XC_MethodHook() {
-                                @Override protected void beforeHookedMethod(MethodHookParam param) {
-                                    XposedBridge.log(TAG + "CONTACTS caller "
-                                            + methodName + "() in " + param.thisObject.getClass().getName());
-                                }
-                            });
-                        }
-                    }
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + "CONTACTS caller hook failed " + name + ": " + t);
-                }
-            }
-            dex.close();
-            XposedBridge.log(TAG + "CONTACTS caller scan finished found=" + found);
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "CONTACTS caller scan failed: " + t);
-        }
-    }
-
-    private static void hookContactsTarget(final ClassLoader cl, final String className, final String methodName) {
-        try {
-            Class<?> cls = Class.forName(className, false, cl);
-            XposedBridge.log(TAG + "CONTACTS target=" + className);
-            for (Method m : cls.getDeclaredMethods()) {
-                if (methodName.equals(m.getName()) && m.getParameterTypes().length == 1
-                        && m.getParameterTypes()[0] == String.class) {
-                    XposedBridge.hookMethod(m, new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "CONTACTS " + methodName
-                                    + " number=" + String.valueOf(param.args[0]));
-                        }
-                    });
-                }
-            }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "CONTACTS target hook failed " + className + ": " + t);
-        }
-    }
-
-    private static void hookContactsTargetNoArgs(final ClassLoader cl, final String className, final String methodName) {
-        try {
-            Class<?> cls = Class.forName(className, false, cl);
-            for (Method m : cls.getDeclaredMethods()) {
-                if (!methodName.equals(m.getName()) || m.getParameterTypes().length != 0) continue;
-                XposedBridge.hookMethod(m, new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam param) {
-                        XposedBridge.log(TAG + "CONTACTS " + methodName + " ENTER");
-                    }
-                    @Override protected void afterHookedMethod(MethodHookParam param) {
-                        XposedBridge.log(TAG + "CONTACTS " + methodName + " EXIT result=" + String.valueOf(param.getResult()));
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        param.setResult(true);
                     }
                 });
             }
-            XposedBridge.log(TAG + "CONTACTS noarg hook " + className + "." + methodName + " installed");
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "CONTACTS noarg hook FAILED " + className + "." + methodName + ": " + t);
+        } catch (Throwable ignored) {
         }
     }
 
-    private static void hookContactsLoader(final ClassLoader cl, final String className) {
+    private static void hookContactsGate(
+            ClassLoader cl, String methodName) {
         try {
-            Class<?> cls = Class.forName(className, false, cl);
-            XposedBridge.log(TAG + "CONTACTS target=" + className);
-
-            for (java.lang.reflect.Constructor<?> ctor : cls.getDeclaredConstructors()) {
-                XposedBridge.hookMethod(ctor, new XC_MethodHook() {
-                    @Override protected void beforeHookedMethod(MethodHookParam param) {
-                        XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW args="
-                                + java.util.Arrays.toString(param.args));
-                    }
-                    @Override protected void afterHookedMethod(MethodHookParam param) {
-                        if (param.hasThrowable()) {
-                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW THREW="
-                                    + param.getThrowable());
-                        } else {
-                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader NEW OK");
-                        }
+            Class<?> proxy = Class.forName(
+                    "com.android.contacts.util.YellowPageProxy", false, cl);
+            for (Method method : proxy.getDeclaredMethods()) {
+                if (!methodName.equals(method.getName())
+                        || method.getReturnType() != Boolean.TYPE
+                        || method.getParameterTypes().length != 1
+                        || method.getParameterTypes()[0] != Context.class) {
+                    continue;
+                }
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        param.setResult(true);
                     }
                 });
             }
+        } catch (Throwable ignored) {
+        }
+    }
 
-            for (Method m : cls.getDeclaredMethods()) {
-                // CN smali shows J() as the loader's loadInBackground implementation.
-                if ("G".equals(m.getName()) || "J".equals(m.getName()) || "loadInBackground".equals(m.getName())) {
-                    XposedBridge.hookMethod(m, new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader."
-                                    + m.getName() + "() ENTER");
-                        }
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            if (param.hasThrowable()) {
-                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader."
-                                        + m.getName() + "() THREW=" + param.getThrowable());
-                            } else {
-                                XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader."
-                                        + m.getName() + "() EXIT result="
-                                        + (param.getResult() == null ? "null"
-                                        : param.getResult().getClass().getName()));
+    private static void installPresetHooks(
+            ClassLoader cl, Context context) {
+        try {
+            Class<?> preset = Class.forName("r0.c", false, cl);
+
+            XposedHelpers.findAndHookMethod(
+                    preset, "h",
+                    new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            int resId = context.getResources().getIdentifier(
+                                    "yellow_pages_cn", "raw", YELLOWPAGE);
+                            if (resId != 0) {
+                                param.setResult(resId);
                             }
                         }
                     });
+
+            Class<?> base = preset.getSuperclass();
+            if (base != null) {
+                XposedHelpers.findAndHookMethod(
+                        base, "l", Context.class,
+                        new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                param.setResult(true);
+                            }
+                        });
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void importYellowPageData(
+            ClassLoader cl, Context context, Class<?> dbHelperClass) {
+        try {
+            Object helper = XposedHelpers.callStaticMethod(
+                    dbHelperClass, "E", context);
+            SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
+                    helper, "getWritableDatabase");
+
+            Cursor c = null;
+            try {
+                c = db.rawQuery(
+                        "SELECT (SELECT COUNT(*) FROM yellow_page),"
+                                + " (SELECT COUNT(*) FROM phone_lookup)", null);
+                if (c.moveToFirst() && c.getInt(0) > 0 && c.getInt(1) > 0) {
+                    return;
+                }
+            } finally {
+                if (c != null) {
+                    c.close();
                 }
             }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "CONTACTS loader hook failed " + className + ": " + t);
+
+            installPresetHooks(cl, context);
+            XposedHelpers.callMethod(helper, "L", db);
+            XposedHelpers.callMethod(helper, "N", context, db);
+        } catch (Throwable ignored) {
         }
+    }
+
+    private static void installProviderHooks(
+            ClassLoader cl, Class<?> dbHelperClass) throws Throwable {
+        Class<?> providerClass = Class.forName(
+                "com.miui.yellowpage.providers.yellowpage.YellowPageProvider",
+                false, cl);
+
+        XposedHelpers.findAndHookMethod(
+                providerClass, "onCreate",
+                new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            Context context = (Context) XposedHelpers.callMethod(
+                                    param.thisObject, "getContext");
+                            importYellowPageData(cl, context, dbHelperClass);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                });
+
+        XposedHelpers.findAndHookMethod(
+                providerClass, "query",
+                android.net.Uri.class,
+                String[].class,
+                String.class,
+                String[].class,
+                String.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable() || param.getResult() != null) {
+                            return;
+                        }
+
+                        try {
+                            android.net.Uri uri = (android.net.Uri) param.args[0];
+                            if (uri == null
+                                    || !"miui.yellowpage".equals(uri.getAuthority())
+                                    || uri.getPathSegments().size() != 2
+                                    || !"phone_lookup".equals(
+                                            uri.getPathSegments().get(0))) {
+                                return;
+                            }
+
+                            Context context = (Context) XposedHelpers.callMethod(
+                                    param.thisObject, "getContext");
+                            Object helper = XposedHelpers.callStaticMethod(
+                                    dbHelperClass, "E", context);
+                            SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
+                                    helper, "getReadableDatabase");
+
+                            String number = uri.getLastPathSegment();
+                            String normalized = number;
+
+                            try {
+                                Class<?> normalizer = Class.forName(
+                                        "p022h0.e", false, cl);
+                                normalized = (String) XposedHelpers.callStaticMethod(
+                                        normalizer, "a", context, number);
+                            } catch (Throwable ignored) {
+                            }
+
+                            String table =
+                                    "((SELECT yid AS yellowpage_id, photo_url,thumbnail_url,tag,"
+                                    + "yellow_page_name,yellow_page_name_pinyin,tag_pinyin,number,"
+                                    + "normalized_number,min_match,hide,suspect,call_menu,t9_rank,"
+                                    + "atd_category_id,atd_count,atd_provider,flag,slogan,credit_img,"
+                                    + "number_type,provider_id FROM phone_lookup WHERE normalized_number = ?)"
+                                    + " INNER JOIN yellow_page ON yellowpage_id = yid)";
+
+                            Cursor recovery = db.query(
+                                    table, null, null, new String[]{normalized},
+                                    null, null, "update_time desc");
+
+                            if (recovery == null || !recovery.moveToFirst()) {
+                                if (recovery != null) {
+                                    recovery.close();
+                                }
+                                return;
+                            }
+
+                            String[] columns = recovery.getColumnNames();
+                            MatrixCursor matrix =
+                                    new MatrixCursor(columns, recovery.getCount());
+                            recovery.moveToPosition(-1);
+
+                            while (recovery.moveToNext()) {
+                                Object[] row = new Object[columns.length];
+                                for (int i = 0; i < columns.length; i++) {
+                                    row[i] = recovery.getString(i);
+                                }
+                                matrix.addRow(row);
+                            }
+
+                            recovery.close();
+                            param.setResult(matrix);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                });
     }
 
     @Override
-    public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) {
+    public void handleLoadPackage(
+            final XC_LoadPackage.LoadPackageParam lpparam) {
         if ("com.android.contacts".equals(lpparam.packageName)) {
-            installContactsDiagnostics(lpparam);
+            hookContactsGate(lpparam.classLoader, "i");
+            hookContactsGate(lpparam.classLoader, "j");
             return;
         }
-        if (!"com.miui.yellowpage".equals(lpparam.packageName)) return;
+
+        if (!YELLOWPAGE.equals(lpparam.packageName)) {
+            return;
+        }
 
         try {
-            final ClassLoader cl = lpparam.classLoader;
+            ClassLoader cl = lpparam.classLoader;
 
-            XposedHelpers.findAndHookMethod(
-                    "miui.yellowpage.YellowPageUtils", cl, "isYellowPageAvailable",
-                    Context.class, new XC_MethodHook() {
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            param.setResult(true);
-                            XposedBridge.log(TAG + "isYellowPageAvailable() -> true");
-                        }
-                    });
+            hookBooleanContextMethod(
+                    cl, "miui.yellowpage.YellowPageUtils",
+                    "isYellowPageAvailable");
+            hookBooleanContextMethod(
+                    cl, "miui.yellowpage.YellowPageUtils",
+                    "isYellowPageEnable");
 
-            try {
-                XposedHelpers.findAndHookMethod(
-                        "miui.yellowpage.YellowPageUtils", cl, "isYellowPageEnable",
-                        Context.class, new XC_MethodHook() {
-                            @Override protected void afterHookedMethod(MethodHookParam param) {
-                                boolean old = Boolean.TRUE.equals(param.getResult());
-                                param.setResult(true);
-                                XposedBridge.log(TAG + "isYellowPageEnable() " + old + " -> true");
-                            }
-                        });
-                XposedBridge.log(TAG + "enable hook installed");
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + "enable hook failed: " + t);
-            }
-
-            final Class<?> dbHelperClass = Class.forName(
+            Class<?> dbHelperClass = Class.forName(
                     "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
                     false, cl);
 
-            XposedHelpers.findAndHookMethod(
-                    dbHelperClass, "L", SQLiteDatabase.class, new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "YellowPageDatabaseHelper.L() ENTER");
-                        }
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "YellowPageDatabaseHelper.L() EXIT");
-                        }
-                    });
-            XposedBridge.log(TAG + "DatabaseHelper.L hook installed");
-
-            XposedHelpers.findAndHookMethod(
-                    dbHelperClass, "N", Context.class, SQLiteDatabase.class,
-                    new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() ENTER");
-
-                            Context context = (Context) param.args[0];
-                            findAndHookPresetProvider(cl, context);
-                        }
-
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            if (param.hasThrowable()) {
-                                XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() THREW: "
-                                        + param.getThrowable());
-                                XposedBridge.log(TAG + "N() throwable stack: "
-                                        + android.util.Log.getStackTraceString(param.getThrowable()));
-                            } else {
-                                XposedBridge.log(TAG + "YellowPageDatabaseHelper.N() EXIT normally");
-                            }
-                            SQLiteDatabase db = (SQLiteDatabase) param.args[1];
-                            dumpTableCounts(db);
-                        }
-                    });
-            XposedBridge.log(TAG + "DatabaseHelper.N hook installed");
-
-            Class<?> providerClass = Class.forName(
-                    "com.miui.yellowpage.providers.yellowpage.YellowPageProvider", false, cl);
-
-            XposedHelpers.findAndHookMethod(
-                    providerClass, "onCreate", new XC_MethodHook() {
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "YellowPageProvider.onCreate()");
-
-                            try {
-                                Context context = (Context) XposedHelpers.callMethod(
-                                        param.thisObject, "getContext");
-                                XposedBridge.log(TAG + "scanning preset provider before database open");
-                                findAndHookPresetProvider(cl, context);
-                                Object helper = XposedHelpers.callStaticMethod(
-                                        dbHelperClass, "E", context);
-                                SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
-                                        helper, "getWritableDatabase");
-
-                                XposedBridge.log(TAG + "forcing Provider data import via L()");
-                                XposedHelpers.callMethod(helper, "L", db);
-                                XposedBridge.log(TAG + "forced Provider data import finished");
-
-                                XposedBridge.log(TAG + "forcing preset Yellow Page import via N()");
-                                try {
-                                    Object preset = XposedHelpers.callStaticMethod(
-                                            Class.forName("r0.c", false, cl), "n");
-                                    Object presetPath = XposedHelpers.callMethod(preset, "c", context);
-                                    java.io.File pf = new java.io.File(String.valueOf(presetPath));
-                                    XposedBridge.log(TAG + "preset file path=" + pf.getAbsolutePath()
-                                            + " exists=" + pf.exists()
-                                            + " length=" + (pf.exists() ? pf.length() : -1)
-                                            + " parentExists=" + (pf.getParentFile() != null && pf.getParentFile().exists()));
-                                } catch (Throwable t) {
-                                    XposedBridge.log(TAG + "preset file precheck failed: " + t);
-                                }
-                                XposedHelpers.callMethod(helper, "N", context, db);
-                                XposedBridge.log(TAG + "forced preset Yellow Page import finished");
-
-                                dumpTableCounts(db);
-                            } catch (Throwable t) {
-                                XposedBridge.log(TAG + "forced Provider import failed: " + t);
-                            }
-                        }
-                    });
-
-            XposedHelpers.findAndHookMethod(
-                    providerClass, "query",
-                    android.net.Uri.class, String[].class, String.class,
-                    String[].class, String.class, new XC_MethodHook() {
-                        @Override protected void beforeHookedMethod(MethodHookParam param) {
-                            XposedBridge.log(TAG + "YellowPageProvider.query() uri="
-                                    + param.args[0] + " projection=" + java.util.Arrays.toString((String[]) param.args[1])
-                                    + " selection=" + param.args[2]
-                                    + " args=" + java.util.Arrays.toString((String[]) param.args[3])
-                                    + " sort=" + param.args[4]);
-                            try {
-                                Object calling = XposedHelpers.callMethod(param.thisObject, "getCallingPackage");
-                                XposedBridge.log(TAG + "Provider.query callingPackage=" + calling
-                                        + " uid=" + android.os.Binder.getCallingUid());
-                            } catch (Throwable t) {
-                                XposedBridge.log(TAG + "Provider.query caller diagnostic failed: " + t);
-                            }
-                        }
-                        @Override protected void afterHookedMethod(MethodHookParam param) {
-                            Object result = param.getResult();
-
-                            // EEA provider successfully executes the JOIN query but its
-                            // post-processing can discard the Cursor and return null.
-                            // Recover the already-proven local result for phone lookup items.
-                            if (result == null) {
-                                try {
-                                    android.net.Uri uri = (android.net.Uri) param.args[0];
-                                    if (uri != null && uri.toString().startsWith(
-                                            "content://miui.yellowpage/phone_lookup/")) {
-                                        Context context = (Context) XposedHelpers.callMethod(
-                                                param.thisObject, "getContext");
-                                        Object helper = XposedHelpers.callStaticMethod(
-                                                dbHelperClass, "E", context);
-                                        SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
-                                                helper, "getReadableDatabase");
-                                        String number = uri.getLastPathSegment();
-                                        String normalized = number;
-                                        try {
-                                            Class<?> norm = Class.forName("p022h0.e", false, cl);
-                                            normalized = (String) XposedHelpers.callStaticMethod(
-                                                    norm, "a", context, number);
-                                        } catch (Throwable ignored) {
-                                        }
-                                        String table = "((SELECT yid AS yellowpage_id, photo_url,thumbnail_url,tag,"
-                                                + "yellow_page_name,yellow_page_name_pinyin,tag_pinyin,number,"
-                                                + "normalized_number,min_match,hide,suspect,call_menu,t9_rank,"
-                                                + "atd_category_id,atd_count,atd_provider,flag,slogan,credit_img,"
-                                                + "number_type,provider_id FROM phone_lookup WHERE normalized_number = ?)"
-                                                + " INNER JOIN yellow_page ON yellowpage_id = yid)";
-                                        Cursor recovery = db.query(table, null, null,
-                                                new String[]{normalized}, null, null,
-                                                "update_time desc");
-                                        if (recovery != null && recovery.moveToFirst()) {
-                                            XposedBridge.log(TAG + "Provider recovery: replacing null with "
-                                                    + "direct JOIN Cursor for number=" + number
-                                                    + " normalized=" + normalized
-                                                    + " count=" + recovery.getCount());
-                                            // Return a standalone MatrixCursor instead of the raw SQLiteCursor.
-                                            // This avoids the EEA provider's URL/post-processing path while
-                                            // preserving the exact columns and values from the proven JOIN row.
-                                            String[] recoveryColumns = recovery.getColumnNames();
-                                            MatrixCursor matrix = new MatrixCursor(recoveryColumns, recovery.getCount());
-                                            recovery.moveToPosition(-1);
-                                            while (recovery.moveToNext()) {
-                                                Object[] row = new Object[recoveryColumns.length];
-                                                for (int i = 0; i < recoveryColumns.length; i++) {
-                                                    row[i] = recovery.getString(i);
-                                                }
-                                                matrix.addRow(row);
-                                            }
-                                            recovery.close();
-                                            param.setResult(matrix);
-                                            result = matrix;
-                                        } else if (recovery != null) {
-                                            recovery.close();
-                                        }
-                                    }
-                                } catch (Throwable t) {
-                                    XposedBridge.log(TAG + "Provider recovery failed: " + t);
-                                }
-                            }
-
-                            if (param.hasThrowable()) {
-                                XposedBridge.log(TAG + "query THREW: "
-                                        + android.util.Log.getStackTraceString(param.getThrowable()));
-                            }
-                            if (result instanceof Cursor) {
-                                Cursor cursor = (Cursor) result;
-                                try {
-                                    XposedBridge.log(TAG + "Provider.query result count=" + cursor.getCount());
-                                } catch (Throwable t) {
-                                    XposedBridge.log(TAG + "cursor inspect failed: " + t);
-                                }
-                            } else {
-                                XposedBridge.log(TAG + "query returned non-Cursor="
-                                        + (result == null ? "null" : result.getClass().getName()));
-                            }
-                        }
-                    });
-
-            XposedBridge.log(TAG + "Provider hooks installed");
-            XposedBridge.log(TAG + "HookEntry initialized");
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "HookEntry failed: " + t);
+            installProviderHooks(cl, dbHelperClass);
+        } catch (Throwable ignored) {
         }
     }
 }
