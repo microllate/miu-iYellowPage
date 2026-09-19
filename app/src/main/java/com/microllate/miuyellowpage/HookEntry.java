@@ -68,6 +68,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         if (param.args[1] == sync) {
+                            log("YELLOWPAGE_SYNC: original=" + param.getResult() + " -> true");
                             param.setResult(true);
                         }
                     }
