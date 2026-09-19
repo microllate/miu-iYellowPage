@@ -442,21 +442,22 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                         && !"getHeaderFields".equals(n)) continue;
                 if (method.getDeclaringClass() == Object.class) continue;
                 try {
-                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    final Method hookMethod = method;
+                    XposedBridge.hookMethod(hookMethod, new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam p) {
-                            log("HTTP TRACE ENTER: " + method.getName());
+                            log("HTTP TRACE ENTER: " + hookMethod.getName());
                         }
                         @Override protected void afterHookedMethod(MethodHookParam p) {
                             if (p.hasThrowable()) {
                                 Throwable t=p.getThrowable();
-                                log("HTTP TRACE THROW: " + method.getName() + " "
+                                log("HTTP TRACE THROW: " + hookMethod.getName() + " "
                                         + t.getClass().getName() + ": " + t.getMessage());
                                 return;
                             }
                             Object r=p.getResult();
                             String s=String.valueOf(r);
                             if (s.length()>1200) s=s.substring(0,1200);
-                            log("HTTP TRACE RESULT: " + method.getName() + "=" + s);
+                            log("HTTP TRACE RESULT: " + hookMethod.getName() + "=" + s);
                         }
                     });
                 } catch (Throwable ignored) {}
