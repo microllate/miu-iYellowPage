@@ -2025,92 +2025,79 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     private static void hookYellowPageDataFileReads(ClassLoader cl) {
         try {
             final String finalName = "yellow_pages.dat";
-            final String tempName = ".yellow_pages.dat.tmp";
-            final String tempPath = "/data/user/0/com.miui.yellowpage/files/" + tempName;
+            final String tempPath =
+                    "/data/user/0/com.miui.yellowpage/files/.yellow_pages.dat.tmp";
+
+            // Constructors are not returned by Class.getDeclaredMethods(), so the
+            // previous implementation installed zero hooks. Hook the constructors
+            // explicitly and redirect only YellowPage's own data-file opens.
+            XC_MethodHook redirect = new XC_MethodHook() {
+                private boolean isYellowPageCaller() {
+                    try {
+                        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+                        for (StackTraceElement e : trace) {
+                            String n = String.valueOf(e.getClassName());
+                            if (n.startsWith("com.miui.yellowpage.") || n.startsWith("o0.")) {
+                                return true;
+                            }
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                    return false;
+                }
+
+                private String pathOf(Object value) {
+                    if (value instanceof java.io.File) {
+                        return ((java.io.File) value).getAbsolutePath();
+                    }
+                    return String.valueOf(value);
+                }
+
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    try {
+                        if (param.args == null || param.args.length == 0) return;
+                        String path = pathOf(param.args[0]);
+                        if (!path.endsWith(finalName)
+                                || !path.contains("com.miui.yellowpage")
+                                || !isYellowPageCaller()) {
+                            return;
+                        }
+
+                        if (param.args[0] instanceof java.io.File) {
+                            param.args[0] = new java.io.File(tempPath);
+                        } else if (param.args[0] instanceof String) {
+                            param.args[0] = tempPath;
+                        } else {
+                            return;
+                        }
+
+                        log("DATA READ REDIRECT: "
+                                + param.method.getDeclaringClass().getName()
+                                + ".<init> " + path + " -> " + tempPath);
+                    } catch (Throwable e) {
+                        log("DATA READ REDIRECT failed: "
+                                + e.getClass().getSimpleName() + ": "
+                                + String.valueOf(e.getMessage()));
+                    }
+                }
+            };
 
             Class<?> fis = Class.forName("java.io.FileInputStream", false,
                     ClassLoader.getSystemClassLoader());
-            int fileInputHooks = 0;
-            for (Method method : fis.getDeclaredMethods()) {
-                if (!"<init>".equals(method.getName())) continue;
-                Class<?>[] p = method.getParameterTypes();
-                if (p.length != 1 || (p[0] != java.io.File.class && p[0] != String.class)) continue;
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        try {
-                            String path = p[0] == java.io.File.class
-                                    ? ((java.io.File) param.args[0]).getAbsolutePath()
-                                    : String.valueOf(param.args[0]);
-                            if (!path.endsWith(finalName) || !path.contains("com.miui.yellowpage")) return;
-                            StackTraceElement[] trace = Thread.currentThread().getStackTrace();
-                            boolean yellowPageCaller = false;
-                            for (StackTraceElement e : trace) {
-                                String n = String.valueOf(e.getClassName());
-                                if (n.startsWith("com.miui.yellowpage.") || n.startsWith("o0.")) {
-                                    yellowPageCaller = true;
-                                    break;
-                                }
-                            }
-                            if (!yellowPageCaller) return;
-                            if (p[0] == java.io.File.class) {
-                                param.args[0] = new java.io.File(tempPath);
-                            } else {
-                                param.args[0] = tempPath;
-                            }
-                            log("DATA READ REDIRECT: FileInputStream " + path + " -> " + tempPath);
-                        } catch (Throwable e) {
-                            log("DATA READ REDIRECT FileInputStream failed: "
-                                    + e.getClass().getSimpleName());
-                        }
-                    }
-                });
-                fileInputHooks++;
-            }
-            log("DATA READ FileInputStream hooks installed=" + fileInputHooks);
+            XposedHelpers.findAndHookConstructor(
+                    fis, java.io.File.class, redirect);
+            XposedHelpers.findAndHookConstructor(
+                    fis, String.class, redirect);
+            log("DATA READ FileInputStream constructors hooked=2");
 
             Class<?> raf = Class.forName("java.io.RandomAccessFile", false,
                     ClassLoader.getSystemClassLoader());
-            int rafHooks = 0;
-            for (Method method : raf.getDeclaredMethods()) {
-                if (!"<init>".equals(method.getName())) continue;
-                Class<?>[] p = method.getParameterTypes();
-                if (p.length != 2
-                        || (p[0] != java.io.File.class && p[0] != String.class)
-                        || p[1] != String.class) continue;
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        try {
-                            String path = p[0] == java.io.File.class
-                                    ? ((java.io.File) param.args[0]).getAbsolutePath()
-                                    : String.valueOf(param.args[0]);
-                            if (!path.endsWith(finalName) || !path.contains("com.miui.yellowpage")) return;
-                            StackTraceElement[] trace = Thread.currentThread().getStackTrace();
-                            boolean yellowPageCaller = false;
-                            for (StackTraceElement e : trace) {
-                                String n = String.valueOf(e.getClassName());
-                                if (n.startsWith("com.miui.yellowpage.") || n.startsWith("o0.")) {
-                                    yellowPageCaller = true;
-                                    break;
-                                }
-                            }
-                            if (!yellowPageCaller) return;
-                            if (p[0] == java.io.File.class) {
-                                param.args[0] = new java.io.File(tempPath);
-                            } else {
-                                param.args[0] = tempPath;
-                            }
-                            log("DATA READ REDIRECT: RandomAccessFile " + path + " -> " + tempPath);
-                        } catch (Throwable e) {
-                            log("DATA READ REDIRECT RandomAccessFile failed: "
-                                    + e.getClass().getSimpleName());
-                        }
-                    }
-                });
-                rafHooks++;
-            }
-            log("DATA READ RandomAccessFile hooks installed=" + rafHooks);
+            XposedHelpers.findAndHookConstructor(
+                    raf, java.io.File.class, String.class, redirect);
+            XposedHelpers.findAndHookConstructor(
+                    raf, String.class, String.class, redirect);
+            log("DATA READ RandomAccessFile constructors hooked=2");
         } catch (Throwable e) {
             log("DATA READ REDIRECT install failed: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
