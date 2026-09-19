@@ -928,15 +928,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 ? "null" : result.getClass().getName()));
 
                         if ("getResponseCode".equals(name)) {
-                            try {
-                                java.net.HttpURLConnection c =
-                                        (java.net.HttpURLConnection) param.thisObject;
-                                log("LIVE HTTP RESPONSE: code=" + c.getResponseCode()
-                                        + " message=" + c.getResponseMessage()
-                                        + " contentType=" + c.getContentType()
-                                        + " length=" + c.getContentLengthLong());
-                            } catch (Throwable ignored) {
-                            }
+                            log("LIVE HTTP RESPONSE CODE: " + String.valueOf(result));
                         }
                     }
                 });
@@ -1006,15 +998,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                         ? "null" : result.getClass().getName()));
 
                                 if ("getResponseCode".equals(name)) {
-                                    try {
-                                        java.net.HttpURLConnection c =
-                                                (java.net.HttpURLConnection) param.thisObject;
-                                        log("LIVE RESPONSE: code=" + c.getResponseCode()
-                                                + " message=" + c.getResponseMessage()
-                                                + " contentType=" + c.getContentType()
-                                                + " length=" + c.getContentLengthLong());
-                                    } catch (Throwable ignored) {
-                                    }
+                                    log("LIVE RESPONSE CODE: " + String.valueOf(result));
                                 }
                             }
                         });
