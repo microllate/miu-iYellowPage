@@ -1621,67 +1621,88 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     private static void hookYellowPageRegionParam(ClassLoader cl) {
         try {
             Class<?> k0 = Class.forName("com.miui.yellowpage.utils.k0", false, cl);
-            int found = 0;
-            for (Method method : k0.getDeclaredMethods()) {
-                if (!"e".equals(method.getName())
-                        || !Modifier.isStatic(method.getModifiers())
-                        || method.getParameterTypes().length != 1
-                        || method.getParameterTypes()[0] != java.util.Map.class
-                        || method.getReturnType() != String.class) {
+            Method[] methods = k0.getDeclaredMethods();
+            int eCount = 0;
+
+            log("REGION PARAM k0 runtime class=" + k0.getName()
+                    + " methods=" + methods.length);
+
+            for (Method method : methods) {
+                Class<?>[] p = method.getParameterTypes();
+                StringBuilder shape = new StringBuilder();
+                shape.append(method.getName()).append("(");
+                for (int i = 0; i < p.length; i++) {
+                    if (i > 0) shape.append(",");
+                    shape.append(p[i].getName());
+                }
+                shape.append(")->").append(method.getReturnType().getName())
+                        .append(" static=").append(Modifier.isStatic(method.getModifiers()));
+                log("REGION PARAM METHOD: " + shape);
+
+                if (!"e".equals(method.getName())) {
                     continue;
                 }
 
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                final Method target = method;
+                XposedBridge.hookMethod(target, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
                         try {
-                            Object arg = param.args != null && param.args.length > 0
-                                    ? param.args[0] : null;
-                            if (arg instanceof java.util.Map) {
+                            log("REGION PARAM ENTER: " + target.getName()
+                                    + " args=" + formatHookArgs(param.args));
+
+                            if (param.args == null) return;
+
+                            for (int i = 0; i < param.args.length; i++) {
+                                Object arg = param.args[i];
+                                if (!(arg instanceof java.util.Map)) continue;
+
                                 java.util.Map<?, ?> map = (java.util.Map<?, ?>) arg;
-                                Object original = map.get("region");
-                                log("REGION PARAM ENTER: k0.e region="
-                                        + String.valueOf(original)
-                                        + " keys=" + String.valueOf(map.keySet()));
+                                log("REGION PARAM MAP[" + i + "]: keys="
+                                        + String.valueOf(map.keySet())
+                                        + " region=" + String.valueOf(map.get("region"))
+                                        + " locid=" + String.valueOf(map.get("locid")));
 
                                 if (map.containsKey("region")) {
                                     @SuppressWarnings("unchecked")
                                     java.util.Map<Object, Object> mutable =
                                             (java.util.Map<Object, Object>) map;
+                                    Object original = mutable.get("region");
                                     mutable.put("region", "CN");
-                                    log("REGION PARAM FORCE: "
+                                    log("REGION PARAM FORCE: region "
                                             + String.valueOf(original) + " -> CN");
                                 }
                             }
                         } catch (Throwable e) {
                             log("REGION PARAM FORCE FAILED: "
-                                    + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
+                                    + e.getClass().getName() + ": "
+                                    + String.valueOf(e.getMessage()));
                         }
                     }
 
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
                         if (param.hasThrowable()) {
-                            log("REGION PARAM THROW: "
+                            log("REGION PARAM THROW: " + target.getName() + " "
                                     + param.getThrowable().getClass().getName() + ": "
                                     + String.valueOf(param.getThrowable().getMessage()));
                             return;
                         }
                         Object result = param.getResult();
                         String text = String.valueOf(result);
-                        if (text.length() > 500) text = text.substring(0, 500);
-                        log("REGION PARAM RESULT: _encparam=" + text);
+                        if (text.length() > 1000) text = text.substring(0, 1000);
+                        log("REGION PARAM RESULT: " + target.getName()
+                                + " -> " + text);
                     }
                 });
-                found++;
-                log("hooked YellowPage region builder: k0.e(Map)->String");
+
+                eCount++;
+                log("hooked YellowPage runtime k0.e overload: " + shape);
             }
 
-            if (found == 0) {
-                log("REGION PARAM: k0.e(Map)->String not found");
-            }
+            log("REGION PARAM e() overloads hooked=" + eCount);
         } catch (Throwable e) {
-            log("REGION PARAM hook failed: " + e.getClass().getName()
+            log("REGION PARAM runtime scan failed: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
         }
     }
