@@ -2169,7 +2169,7 @@ public class HookEntry implements IXposedHookLoadPackage {
 
     private static void hookYellowPageCopyHelper(ClassLoader cl) {
         try {
-            Class<?> helper = Class.forName("e1.C0282c", false, cl);
+            Class<?> helper = Class.forName("e1.c", false, cl);
             Method copy = helper.getDeclaredMethod(
                     "b", java.io.InputStream.class, java.io.File.class);
             XposedBridge.hookMethod(copy, new XC_MethodHook() {
@@ -2186,7 +2186,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                         return;
                     }
 
-                    // Original e1.C0282c.b() deletes the target first. On this
+                    // Original e1.c.b() deletes the target first. On this
                     // ROM that unlink/delete operation fails with EACCES, even
                     // though the existing target inode is writable. Keep the
                     // same copy operation, but overwrite the existing inode in
@@ -2222,7 +2222,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                     }
                 }
             });
-            log("YELLOWPAGE COPY BYPASS hooked e1.C0282c.b(InputStream,File)");
+            log("YELLOWPAGE COPY BYPASS hooked e1.c.b(InputStream,File)");
         } catch (Throwable e) {
             log("YELLOWPAGE COPY BYPASS hook failed: "
                     + e.getClass().getSimpleName() + ":"
