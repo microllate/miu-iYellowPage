@@ -2021,6 +2021,102 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookYellowPageDataFileReads(ClassLoader cl) {
+        try {
+            final String finalName = "yellow_pages.dat";
+            final String tempName = ".yellow_pages.dat.tmp";
+            final String tempPath = "/data/user/0/com.miui.yellowpage/files/" + tempName;
+
+            Class<?> fis = Class.forName("java.io.FileInputStream", false,
+                    ClassLoader.getSystemClassLoader());
+            int fileInputHooks = 0;
+            for (Method method : fis.getDeclaredMethods()) {
+                if (!"<init>".equals(method.getName())) continue;
+                Class<?>[] p = method.getParameterTypes();
+                if (p.length != 1 || (p[0] != java.io.File.class && p[0] != String.class)) continue;
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            String path = p[0] == java.io.File.class
+                                    ? ((java.io.File) param.args[0]).getAbsolutePath()
+                                    : String.valueOf(param.args[0]);
+                            if (!path.endsWith(finalName) || !path.contains("com.miui.yellowpage")) return;
+                            StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+                            boolean yellowPageCaller = false;
+                            for (StackTraceElement e : trace) {
+                                String n = String.valueOf(e.getClassName());
+                                if (n.startsWith("com.miui.yellowpage.") || n.startsWith("o0.")) {
+                                    yellowPageCaller = true;
+                                    break;
+                                }
+                            }
+                            if (!yellowPageCaller) return;
+                            if (p[0] == java.io.File.class) {
+                                param.args[0] = new java.io.File(tempPath);
+                            } else {
+                                param.args[0] = tempPath;
+                            }
+                            log("DATA READ REDIRECT: FileInputStream " + path + " -> " + tempPath);
+                        } catch (Throwable e) {
+                            log("DATA READ REDIRECT FileInputStream failed: "
+                                    + e.getClass().getSimpleName());
+                        }
+                    }
+                });
+                fileInputHooks++;
+            }
+            log("DATA READ FileInputStream hooks installed=" + fileInputHooks);
+
+            Class<?> raf = Class.forName("java.io.RandomAccessFile", false,
+                    ClassLoader.getSystemClassLoader());
+            int rafHooks = 0;
+            for (Method method : raf.getDeclaredMethods()) {
+                if (!"<init>".equals(method.getName())) continue;
+                Class<?>[] p = method.getParameterTypes();
+                if (p.length != 2
+                        || (p[0] != java.io.File.class && p[0] != String.class)
+                        || p[1] != String.class) continue;
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            String path = p[0] == java.io.File.class
+                                    ? ((java.io.File) param.args[0]).getAbsolutePath()
+                                    : String.valueOf(param.args[0]);
+                            if (!path.endsWith(finalName) || !path.contains("com.miui.yellowpage")) return;
+                            StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+                            boolean yellowPageCaller = false;
+                            for (StackTraceElement e : trace) {
+                                String n = String.valueOf(e.getClassName());
+                                if (n.startsWith("com.miui.yellowpage.") || n.startsWith("o0.")) {
+                                    yellowPageCaller = true;
+                                    break;
+                                }
+                            }
+                            if (!yellowPageCaller) return;
+                            if (p[0] == java.io.File.class) {
+                                param.args[0] = new java.io.File(tempPath);
+                            } else {
+                                param.args[0] = tempPath;
+                            }
+                            log("DATA READ REDIRECT: RandomAccessFile " + path + " -> " + tempPath);
+                        } catch (Throwable e) {
+                            log("DATA READ REDIRECT RandomAccessFile failed: "
+                                    + e.getClass().getSimpleName());
+                        }
+                    }
+                });
+                rafHooks++;
+            }
+            log("DATA READ RandomAccessFile hooks installed=" + rafHooks);
+        } catch (Throwable e) {
+            log("DATA READ REDIRECT install failed: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookYellowPageDownload(ClassLoader cl) {
         try {
             Class<?> d = Class.forName("o0.d", false, cl);
@@ -2054,6 +2150,10 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 found++;
             }
             log("DOWNLOAD o0.d.p hooks installed=" + found);
+            // The CDN payload is valid, but EEA may prevent replacing the existing
+            // yellow_pages.dat. Keep the downloaded .tmp file and transparently
+            // redirect YellowPage readers to it instead of requiring a filesystem move.
+            hookYellowPageDataFileReads(cl);
 
             // The CDN file is now downloaded successfully, but o0.d.q() fails
             // while moving .yellow_pages.dat.tmp to the final yellow_pages.dat.
@@ -2079,10 +2179,11 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             log("MOVE THROW: o0.d.q " + t.getClass().getName()
                                     + ": " + String.valueOf(t.getMessage()));
 
-                            if (String.valueOf(t.getMessage()).contains("failed to move")
-                                    && recoverYellowPageMove(param.args)) {
+                            if (String.valueOf(t.getMessage()).contains("failed to move")) {
+                                boolean recovered = recoverYellowPageMove(param.args);
                                 param.setThrowable(null);
-                                log("MOVE RECOVERY: suppressed o0.d.q failure");
+                                log("MOVE RECOVERY: suppressed o0.d.q failure; physicalMove=" + recovered
+                                        + "; readers redirected to .yellow_pages.dat.tmp");
                             }
                         }
                     });
