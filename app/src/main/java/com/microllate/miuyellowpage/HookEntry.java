@@ -1074,6 +1074,58 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookYellowPageResponseParser(ClassLoader cl) {
+        try {
+            Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
+            final String[] fields = new String[] {"f6461m", "f6462n", "f6463o", "f6464p"};
+            for (Method method : http.getDeclaredMethods()) {
+                final String name = method.getName();
+                if (!"u".equals(name) && !"v".equals(name)
+                        && !"w".equals(name) && !"x".equals(name)) {
+                    continue;
+                }
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("HTTP PARSER ENTER: H." + name
+                                + " args=" + formatHookArgs(param.args));
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("HTTP PARSER THROW: H." + name + " "
+                                    + t.getClass().getName() + ": "
+                                    + String.valueOf(t.getMessage()));
+                            return;
+                        }
+                        StringBuilder out = new StringBuilder();
+                        out.append("HTTP PARSER RESULT: H.").append(name)
+                                .append(" -> ").append(String.valueOf(param.getResult()));
+                        for (String fieldName : fields) {
+                            try {
+                                java.lang.reflect.Field f =
+                                        http.getDeclaredField(fieldName);
+                                f.setAccessible(true);
+                                Object value = f.get(param.thisObject);
+                                String text = String.valueOf(value);
+                                if (text.length() > 2000) text = text.substring(0, 2000);
+                                out.append(" ").append(fieldName).append("=").append(text);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                        log(out.toString());
+                    }
+                });
+                log("hooked HTTP PARSER: H." + name);
+            }
+        } catch (Throwable e) {
+            log("HTTP parser hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookMeteredNetworkGuard(ClassLoader cl) {
         try {
             Class<?> cm = Class.forName("android.net.ConnectivityManager", false, cl);
@@ -1524,6 +1576,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
                             hookYellowPageHttpDecision(cl);
+                            hookYellowPageResponseParser(cl);
                             hookYellowPageHttpBase(cl);
                             hookYellowPageLiveHttp(cl);
                             hookYellowPageDatabaseWrites(cl);
