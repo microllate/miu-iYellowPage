@@ -21,7 +21,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String YELLOWPAGE = "com.miui.yellowpage";
     private static final String TAG = "miu-iYellowPage";
-    private static final java.util.Set<String> HTTP_TRACE_HOOKED = new java.util.HashSet<>();
 
     private static void log(String message) {
         Log.i(TAG, message);
@@ -427,133 +426,68 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
     private static void hookHConnectionResponse(java.net.HttpURLConnection connection) {
         try {
-            if (connection == null) return;
-
-            final Class<?> runtime = connection.getClass();
-            log("HTTP TRACE DIRECT CLASS: " + runtime.getName());
-
-            // Hook the concrete runtime object AND its OkHttp delegate. On Android's
-            // com.android.okhttp HUC implementation, HttpsURLConnectionImpl is a
-            // wrapper around HttpURLConnectionImpl; H.u() can dispatch through the
-            // delegate instead of the wrapper's reflected methods.
-            hookHttpClassMethods(runtime, "RUNTIME");
-
-            Class<?> current = runtime;
-            int depth = 0;
-            while (current != null && current != Object.class && depth++ < 8) {
-                for (java.lang.reflect.Field field : current.getDeclaredFields()) {
-                    try {
-                        field.setAccessible(true);
-                        Object value = field.get(connection);
-                        if (value == null) continue;
-
-                        Class<?> valueClass = value.getClass();
-                        String fieldName = field.getName();
-                        if (fieldName.toLowerCase().contains("delegate")
-                                || fieldName.toLowerCase().contains("engine")
-                                || valueClass.getName().contains("okhttp")) {
-                            log("HTTP TRACE FIELD: " + current.getName() + "."
-                                    + fieldName + " -> " + valueClass.getName());
-                            hookHttpClassMethods(valueClass, "FIELD:" + fieldName);
-                        }
-                    } catch (Throwable e) {
-                        log("HTTP TRACE FIELD FAIL: " + current.getName() + "."
-                                + field.getName() + " " + e.getClass().getSimpleName());
-                    }
-                }
-                current = current.getSuperclass();
+            if (connection == null) {
+                return;
             }
-        } catch (Throwable e) {
-            log("HTTP TRACE DIRECT INSTALL THROW: " + e.getClass().getName()
-                    + ": " + String.valueOf(e.getMessage()));
-        }
-    }
 
-    private static void hookHttpClassMethods(final Class<?> runtime, final String source) {
-        if (runtime == null) return;
-        Class<?> current = runtime;
-        int depth = 0;
-        int hooked = 0;
+            final Class<?> connectionClass = connection.getClass();
+            log("HTTP LIVE CLASS: " + connectionClass.getName());
 
-        while (current != null && current != Object.class && depth++ < 10) {
-            for (final Method method : current.getDeclaredMethods()) {
-                final String name = method.getName();
+            int hooked = 0;
+            for (Method method : connectionClass.getMethods()) {
+                String name = method.getName();
                 Class<?>[] params = method.getParameterTypes();
 
-                boolean target = params.length == 0
-                        && ("connect".equals(name)
-                        || "getResponseCode".equals(name)
-                        || "getResponseMessage".equals(name)
-                        || "getInputStream".equals(name)
-                        || "getErrorStream".equals(name)
-                        || "getContent".equals(name)
-                        || "getResponse".equals(name)
-                        || "getResponseBody".equals(name)
-                        || "getNetworkResponse".equals(name));
+                if ((("getResponseCode".equals(name) || "getInputStream".equals(name)
+                        || "getErrorStream".equals(name))
+                        && params.length == 0)) {
 
-                if (!target) continue;
-
-                final String key = "DIRECT#" + runtime.getName() + "#"
-                        + current.getName() + "#" + name + "#"
-                        + method.toGenericString();
-
-                synchronized (HookEntry.class) {
-                    if (HTTP_TRACE_HOOKED.contains(key)) continue;
-                    HTTP_TRACE_HOOKED.add(key);
-                }
-
-                try {
-                    method.setAccessible(true);
-                    XposedBridge.hookMethod(method, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            log("HTTP DIRECT ENTER [" + source + "]: "
-                                    + method.getDeclaringClass().getName() + "."
-                                    + method.getName());
-                        }
-
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            if (param.hasThrowable()) {
-                                Throwable t = param.getThrowable();
-                                log("HTTP DIRECT THROW [" + source + "]: "
-                                        + method.getName() + " "
-                                        + t.getClass().getName() + ": "
-                                        + String.valueOf(t.getMessage()));
-                                return;
+                    final String methodName = name;
+                    try {
+                        XposedBridge.hookMethod(method, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                log("HTTP LIVE " + methodName + " ENTER url=" + safeConnectionUrl(param.thisObject));
                             }
 
-                            Object result = param.getResult();
-                            if ("getResponseCode".equals(method.getName())) {
-                                log("HTTP DIRECT RESPONSE CODE: " + String.valueOf(result));
-                            } else if ("getInputStream".equals(method.getName())
-                                    || "getErrorStream".equals(method.getName())
-                                    || "getResponseBody".equals(method.getName())) {
-                                log("HTTP DIRECT STREAM: " + method.getName() + " -> "
-                                        + (result == null ? "null"
-                                        : result.getClass().getName()));
-                            } else {
-                                String text = String.valueOf(result);
-                                if (text.length() > 800) text = text.substring(0, 800);
-                                log("HTTP DIRECT RESULT: " + method.getName()
-                                        + " -> " + text);
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("HTTP LIVE " + methodName + " THROW "
+                                            + t.getClass().getName() + ": "
+                                            + String.valueOf(t.getMessage()));
+                                } else {
+                                    Object result = param.getResult();
+                                    String resultText;
+                                    if (result == null) {
+                                        resultText = "null";
+                                    } else {
+                                        resultText = result.getClass().getName() + ":" + String.valueOf(result);
+                                        if (resultText.length() > 500) {
+                                            resultText = resultText.substring(0, 500);
+                                        }
+                                    }
+                                    log("HTTP LIVE " + methodName + " RESULT " + resultText);
+                                }
                             }
-                        }
-                    });
-                    hooked++;
-                    log("HTTP DIRECT HOOKED [" + source + "]: "
-                            + current.getName() + "." + name);
-                } catch (Throwable e) {
-                    log("HTTP DIRECT HOOK FAIL [" + source + "]: "
-                            + current.getName() + "." + name + " "
-                            + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
+                        });
+                        hooked++;
+                        log("hooked HTTP LIVE method: " + connectionClass.getName()
+                                + "." + methodName + "()");
+                    } catch (Throwable e) {
+                        log("HTTP LIVE hook failed " + methodName + ": "
+                                + e.getClass().getName());
+                    }
                 }
             }
-            current = current.getSuperclass();
-        }
 
-        log("HTTP DIRECT HOOKS INSTALLED [" + source + "]: " + hooked
-                + " class=" + runtime.getName());
+            log("HTTP LIVE hooks installed=" + hooked
+                    + " class=" + connectionClass.getName());
+        } catch (Throwable e) {
+            log("HTTP LIVE hook install THROW: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
     }
 
     private static String safeConnectionUrl(Object object) {
