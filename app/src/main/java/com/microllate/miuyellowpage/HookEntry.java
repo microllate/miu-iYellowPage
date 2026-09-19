@@ -406,6 +406,23 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+    private static String formatHookArgs(Object[] args) {
+        if (args == null || args.length == 0) return "0";
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < args.length; i++) {
+            if (i > 0) out.append(" | ");
+            Object value = args[i];
+            if (value == null) {
+                out.append("null");
+            } else {
+                String text = String.valueOf(value);
+                if (text.length() > 300) text = text.substring(0, 300);
+                out.append(value.getClass().getName()).append(":").append(text);
+            }
+        }
+        return out.toString();
+    }
+
     private static void hookReturnedPullObject(Object target) {
         try {
             final Class<?> cls = target.getClass();
@@ -419,7 +436,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
                         log("PullTask returned ENTER: " + cls.getName() + "." + methodName
-                                + " args=" + (param.args == null ? 0 : param.args.length));
+                                + " args=" + formatHookArgs(param.args));
                     }
 
                     @Override
@@ -432,6 +449,9 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             String text = String.valueOf(param.getResult());
                             if (text.length() > 500) text = text.substring(0, 500);
                             log("PullTask returned RESULT: " + methodName + "=" + text);
+                            if ("d".equals(methodName) && param.getResult() != null) {
+                                hookReturnedPullObject(param.getResult());
+                            }
                         }
                     }
                 });
