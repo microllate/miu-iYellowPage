@@ -21,6 +21,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class HookEntry implements IXposedHookLoadPackage {
     private static final String YELLOWPAGE = "com.miui.yellowpage";
     private static final String TAG = "miu-iYellowPage";
+    private static final java.util.Set<String> HTTP_TRACE_HOOKED = new java.util.HashSet<>();
 
     private static void log(String message) {
         Log.i(TAG, message);
