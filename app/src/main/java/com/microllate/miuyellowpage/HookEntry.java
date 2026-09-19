@@ -423,6 +423,63 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         return out.toString();
     }
 
+
+    private static void probeHNetworkCall(Object hObject) {
+        try {
+            if (hObject == null) {
+                log("H NETWORK PROBE: hObject=null");
+                return;
+            }
+
+            Method dMethod = null;
+            Class<?> cls = hObject.getClass().getSuperclass();
+            int depth = 0;
+            while (cls != null && cls != Object.class && depth < 6) {
+                for (Method method : cls.getDeclaredMethods()) {
+                    if ("d".equals(method.getName())
+                            && method.getParameterTypes().length == 0) {
+                        dMethod = method;
+                        break;
+                    }
+                }
+                if (dMethod != null) break;
+                cls = cls.getSuperclass();
+                depth++;
+            }
+
+            if (dMethod == null) {
+                log("H NETWORK PROBE: zero-arg d() not found");
+                return;
+            }
+
+            dMethod.setAccessible(true);
+            log("H NETWORK PROBE: invoking " + dMethod.getDeclaringClass().getName()
+                    + ".d() return=" + dMethod.getReturnType().getName());
+
+            Object result = dMethod.invoke(hObject);
+
+            if (result == null) {
+                log("H NETWORK PROBE RESULT: null");
+                return;
+            }
+
+            log("H NETWORK PROBE RESULT: " + result.getClass().getName());
+
+            if (result instanceof java.net.HttpURLConnection) {
+                java.net.HttpURLConnection connection =
+                        (java.net.HttpURLConnection) result;
+                try {
+                    log("H NETWORK PROBE URL: " + connection.getURL());
+                } catch (Throwable ignored) {
+                }
+            }
+        } catch (Throwable e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            log("H NETWORK PROBE THROW: " + cause.getClass().getName()
+                    + ": " + String.valueOf(cause.getMessage()));
+        }
+    }
+
     private static void hookReturnedPullObject(Object target) {
         try {
             final Class<?> cls = target.getClass();
@@ -437,6 +494,9 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     protected void beforeHookedMethod(MethodHookParam param) {
                         log("PullTask returned ENTER: " + cls.getName() + "." + methodName
                                 + " args=" + formatHookArgs(param.args));
+                        if ("u".equals(methodName) && param.args != null && param.args.length == 0) {
+                            probeHNetworkCall(param.thisObject);
+                        }
                     }
 
                     @Override
