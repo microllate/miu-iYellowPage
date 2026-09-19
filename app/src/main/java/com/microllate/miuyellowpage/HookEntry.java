@@ -1470,6 +1470,80 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+    private static void hookYellowPageStreamUtility(ClassLoader cl) {
+        try {
+            Class<?> x = Class.forName("com.miui.yellowpage.utils.x", false, cl);
+            int found = 0;
+            for (Method method : x.getDeclaredMethods()) {
+                final Method target = method;
+                final String name = method.getName();
+                if (!"i".equals(name) && !"j".equals(name)) continue;
+
+                XposedBridge.hookMethod(target, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("STREAM UTIL ENTER: x." + name
+                                + " args=" + formatHookArgs(param.args)
+                                + " this=" + String.valueOf(param.thisObject));
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("STREAM UTIL THROW: x." + name + " "
+                                    + t.getClass().getName() + ": "
+                                    + String.valueOf(t.getMessage()));
+                            return;
+                        }
+
+                        Object result = param.getResult();
+                        log("STREAM UTIL RESULT: x." + name
+                                + " -> " + String.valueOf(result)
+                                + " resultClass="
+                                + (result == null ? "null" : result.getClass().getName()));
+
+                        if ("i".equals(name) && result == null) {
+                            // x.i() is the final stream acquisition point used by
+                            // o0.d.p -> s0.t. If the obfuscated helper returns null
+                            // despite a live HTTP 200/content-length response, expose
+                            // the exact j0.d()/getInputStream path without changing it.
+                            try {
+                                Object owner = param.thisObject;
+                                if (owner instanceof com.miui.yellowpage.utils.j0) {
+                                    Method d = owner.getClass().getMethod("d");
+                                    Object conn = d.invoke(owner);
+                                    if (conn instanceof java.net.HttpURLConnection) {
+                                        java.net.HttpURLConnection http =
+                                                (java.net.HttpURLConnection) conn;
+                                        log("STREAM UTIL FALLBACK CONNECTION: "
+                                                + http.getClass().getName()
+                                                + " url=" + String.valueOf(http.getURL()));
+                                        java.io.InputStream in = http.getInputStream();
+                                        if (in != null) {
+                                            param.setResult(in);
+                                            log("STREAM UTIL FALLBACK: x.i null -> getInputStream()");
+                                        }
+                                    }
+                                }
+                            } catch (Throwable e) {
+                                log("STREAM UTIL FALLBACK FAILED: "
+                                        + e.getClass().getName() + ": "
+                                        + String.valueOf(e.getMessage()));
+                            }
+                        }
+                    }
+                });
+                found++;
+                log("hooked STREAM UTIL: x." + method.toGenericString());
+            }
+            log("STREAM UTIL hooks installed=" + found);
+        } catch (Throwable e) {
+            log("STREAM UTIL hook failed: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookYellowPageStreamRequest(ClassLoader cl) {
         try {
             Class<?> stream = Class.forName("com.miui.yellowpage.utils.s0", false, cl);
@@ -2829,6 +2903,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPageNetworkGates(cl);
                             hookYellowPageResponseParser(cl);
                             hookYellowPageResponseSurface(cl);
+                            hookYellowPageStreamUtility(cl);
                             hookYellowPageStreamRequest(cl);
                             hookYellowPageHttpBase(cl);
                             hookYellowPageLiveHttp(cl);
