@@ -6,7 +6,10 @@ import android.database.MatrixCursor;
 import android.database.sqlite.SQLiteDatabase;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.Enumeration;
 
+import dalvik.system.DexFile;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -61,34 +64,94 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
-    private static void installPresetHooks(
-            ClassLoader cl, Context context) {
+    private static boolean hasNoArgMethodReturning(
+            Class<?> cls, String name, Class<?> returnType) {
         try {
-            Class<?> preset = Class.forName("r0.c", false, cl);
+            Method method = cls.getDeclaredMethod(name);
+            return method.getReturnType() == returnType;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
 
+    private static boolean isPresetProviderClass(Class<?> cls) {
+        try {
+            if (!hasNoArgMethodReturning(cls, "h", Integer.TYPE)
+                    || !hasNoArgMethodReturning(cls, "d", String.class)
+                    || !hasNoArgMethodReturning(cls, "f", String.class)
+                    || !hasNoArgMethodReturning(cls, "i", String.class)) {
+                return false;
+            }
+
+            Method n = cls.getDeclaredMethod("n");
+            return n.getReturnType() == cls
+                    && Modifier.isStatic(n.getModifiers());
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static void hookPresetProviderClass(
+            Class<?> preset, Context context) {
+        XposedHelpers.findAndHookMethod(
+                preset, "h",
+                new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        int resId = context.getResources().getIdentifier(
+                                "yellow_pages_cn", "raw", YELLOWPAGE);
+                        if (resId != 0) {
+                            param.setResult(resId);
+                        }
+                    }
+                });
+
+        Class<?> base = preset.getSuperclass();
+        if (base != null) {
             XposedHelpers.findAndHookMethod(
-                    preset, "h",
+                    base, "l", Context.class,
                     new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
-                            int resId = context.getResources().getIdentifier(
-                                    "yellow_pages_cn", "raw", YELLOWPAGE);
-                            if (resId != 0) {
-                                param.setResult(resId);
-                            }
+                            param.setResult(true);
                         }
                     });
+        }
+    }
 
-            Class<?> base = preset.getSuperclass();
-            if (base != null) {
-                XposedHelpers.findAndHookMethod(
-                        base, "l", Context.class,
-                        new XC_MethodHook() {
-                            @Override
-                            protected void afterHookedMethod(MethodHookParam param) {
-                                param.setResult(true);
-                            }
-                        });
+    private static void installPresetHooks(
+            ClassLoader cl, Context context) {
+        try {
+            try {
+                Class<?> preset = Class.forName("r0.c", false, cl);
+                hookPresetProviderClass(preset, context);
+                return;
+            } catch (Throwable ignored) {
+                // Current build uses r0.c, but R8 can rename this class.
+                // Fall through to the lazy shape-based scan.
+            }
+
+            String apkPath = context.getApplicationInfo().sourceDir;
+            DexFile dex = new DexFile(apkPath);
+            try {
+                Enumeration<String> entries = dex.entries();
+                while (entries.hasMoreElements()) {
+                    String name = entries.nextElement();
+                    if (name.indexOf('.') < 0) {
+                        continue;
+                    }
+
+                    try {
+                        Class<?> candidate = Class.forName(name, false, cl);
+                        if (isPresetProviderClass(candidate)) {
+                            hookPresetProviderClass(candidate, context);
+                            return;
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            } finally {
+                dex.close();
             }
         } catch (Throwable ignored) {
         }
@@ -123,6 +186,28 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    private static void copyCursorValue(
+            Cursor source, int column, Object[] row) {
+        switch (source.getType(column)) {
+            case Cursor.FIELD_TYPE_NULL:
+                row[column] = null;
+                break;
+            case Cursor.FIELD_TYPE_INTEGER:
+                row[column] = source.getLong(column);
+                break;
+            case Cursor.FIELD_TYPE_FLOAT:
+                row[column] = source.getDouble(column);
+                break;
+            case Cursor.FIELD_TYPE_BLOB:
+                row[column] = source.getBlob(column);
+                break;
+            case Cursor.FIELD_TYPE_STRING:
+            default:
+                row[column] = source.getString(column);
+                break;
+        }
+    }
+
     private static void installProviderHooks(
             ClassLoader cl, Class<?> dbHelperClass) throws Throwable {
         Class<?> providerClass = Class.forName(
@@ -153,11 +238,22 @@ public class HookEntry implements IXposedHookLoadPackage {
                 new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
-                        if (param.hasThrowable() || param.getResult() != null) {
+                        if (param.hasThrowable()) {
+                            return;
+                        }
+
+                        Cursor original = param.getResult() instanceof Cursor
+                                ? (Cursor) param.getResult() : null;
+                        if (original != null && original.getCount() > 0) {
                             return;
                         }
 
                         try {
+                            if (original != null) {
+                                original.close();
+                            }
+                            param.setResult(null);
+
                             android.net.Uri uri = (android.net.Uri) param.args[0];
                             if (uri == null
                                     || !"miui.yellowpage".equals(uri.getAuthority())
@@ -212,7 +308,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                             while (recovery.moveToNext()) {
                                 Object[] row = new Object[columns.length];
                                 for (int i = 0; i < columns.length; i++) {
-                                    row[i] = recovery.getString(i);
+                                    copyCursorValue(recovery, i, row);
                                 }
                                 matrix.addRow(row);
                             }
