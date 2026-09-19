@@ -23,6 +23,10 @@ public class HookEntry implements IXposedHookLoadPackage {
 
     private static void log(String message) {
         Log.i(TAG, message);
+        try {
+            XposedBridge.log(TAG + ": " + message);
+        } catch (Throwable ignored) {
+        }
     }
 
     private static void hookBooleanContextMethod(
