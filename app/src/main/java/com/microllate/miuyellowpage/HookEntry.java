@@ -242,11 +242,16 @@ public class HookEntry implements IXposedHookLoadPackage {
         XposedBridge.log(TAG + "CONTACTS exact Yellow Page caller hooks installed");
 
         // Trace the Contacts-side proxy calls. Do not change any result here.
+        // PeopleActivity -> TwelveKeyDialerFragment/DialerCallVH reaches YellowPage
+        // through AntiFraudUtils.h() -> YellowPageUtils.getPhoneInfo(). Trace both exact calls.
+        hookContactsMethod(cl, "com.android.contacts.util.AntiFraudUtils", "h");
+        hookContactsMethod(cl, "miui.yellowpage.YellowPageUtils", "getPhoneInfo");
+
         try {
             Class<?> proxy = Class.forName("com.android.contacts.util.YellowPageProxy", false, cl);
             for (Method m : proxy.getDeclaredMethods()) {
                 String n = m.getName();
-                if ("r".equals(n) || "q".equals(n) || "i".equals(n)
+                if ("j".equals(n) || "r".equals(n) || "q".equals(n) || "i".equals(n)
                         || "o".equals(n) || "p".equals(n)) {
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
@@ -260,9 +265,9 @@ public class HookEntry implements IXposedHookLoadPackage {
                                         + m.getName() + "() THREW=" + param.getThrowable());
                             } else {
                                 Object result = param.getResult();
-                                if ("i".equals(m.getName())) {
-                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy.i() "
-                                            + String.valueOf(result) + " -> FORCED true");
+                                if ("j".equals(m.getName()) || "i".equals(m.getName())) {
+                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy." + m.getName()
+                                            + "() " + String.valueOf(result) + " -> FORCED true");
                                     param.setResult(true);
                                 } else {
                                     XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
@@ -274,7 +279,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                     });
                 }
             }
-            XposedBridge.log(TAG + "CONTACTS YellowPageProxy j/r/q/o/p hooks installed");
+            XposedBridge.log(TAG + "CONTACTS YellowPageProxy j/r/q/o/p hooks installed (j/i forced true)");
             try {
                 Method rMethod = null;
                 for (Method m : proxy.getDeclaredMethods()) {
