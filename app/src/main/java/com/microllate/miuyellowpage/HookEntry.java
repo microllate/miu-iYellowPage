@@ -244,7 +244,7 @@ public class HookEntry implements IXposedHookLoadPackage {
             Class<?> proxy = Class.forName("com.android.contacts.util.YellowPageProxy", false, cl);
             for (Method m : proxy.getDeclaredMethods()) {
                 String n = m.getName();
-                if ("r".equals(n) || "q".equals(n)
+                if ("r".equals(n) || "q".equals(n) || "i".equals(n)
                         || "o".equals(n) || "p".equals(n)) {
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
@@ -258,9 +258,15 @@ public class HookEntry implements IXposedHookLoadPackage {
                                         + m.getName() + "() THREW=" + param.getThrowable());
                             } else {
                                 Object result = param.getResult();
-                                XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
-                                        + m.getName() + "() EXIT result="
-                                        + String.valueOf(result));
+                                if ("i".equals(m.getName())) {
+                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy.i() "
+                                            + String.valueOf(result) + " -> FORCED true");
+                                    param.setResult(true);
+                                } else {
+                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
+                                            + m.getName() + "() EXIT result="
+                                            + String.valueOf(result));
+                                }
                             }
                         }
                     });
