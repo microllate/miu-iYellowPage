@@ -751,73 +751,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
 
     private static void hookYellowPageHttpDecision(ClassLoader cl) {
-        // Trace the real j0.k setter. H.u() returns 6 immediately for k values other than 0/1.
-        try {
-            Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
-            Method setter = j0.getDeclaredMethod("j", Integer.TYPE);
-            XposedBridge.hookMethod(setter, new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) {
-                    int value = param.args != null && param.args.length > 0 && param.args[0] instanceof Integer
-                            ? (Integer) param.args[0] : Integer.MIN_VALUE;
-                    log("J0.K SET: value=" + value + " object="
-                            + (param.thisObject == null ? "null" : param.thisObject.getClass().getName()));
-                    if (value == -1) {
-                        try {
-                            StackTraceElement[] trace = Thread.currentThread().getStackTrace();
-                            StringBuilder stack = new StringBuilder("J0.K SET -1 STACK:");
-                            int count = 0;
-                            for (StackTraceElement element : trace) {
-                                String frame = String.valueOf(element);
-                                if (frame.contains("HookEntry")) continue;
-                                stack.append(" | ").append(frame);
-                                if (++count >= 8) break;
-                            }
-                            log(stack.toString());
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                }
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) {
-                    if (param.hasThrowable()) {
-                        Throwable t = param.getThrowable();
-                        log("J0.K SET THROW: " + t.getClass().getName() + ": " + String.valueOf(t.getMessage()));
-                    }
-                }
-            });
-            log("hooked J0.k setter: j0.j(int) -> field k");
-        } catch (Throwable e) {
-            log("J0.k setter hook failed: " + e.getClass().getSimpleName()
-                    + ": " + String.valueOf(e.getMessage()));
-        }
-
-        // Trace Q.a(Context), the second gate used by H.u() when k == 0.
-        try {
-            Class<?> q = Class.forName("Q.a", false, cl);
-            Method qMethod = q.getDeclaredMethod("a", Context.class);
-            if (!Modifier.isStatic(qMethod.getModifiers()) || qMethod.getReturnType() != Boolean.TYPE) {
-                log("NETWORK GATE Q.a signature mismatch");
-            } else {
-                XposedBridge.hookMethod(qMethod, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        if (param.hasThrowable()) {
-                            Throwable t = param.getThrowable();
-                            log("NETWORK GATE: Q.a(Context) THROW: " + t.getClass().getName()
-                                    + ": " + String.valueOf(t.getMessage()));
-                        } else {
-                            log("NETWORK GATE: Q.a(Context) -> " + String.valueOf(param.getResult()));
-                        }
-                    }
-                });
-                log("hooked NETWORK GATE: Q.a(Context)");
-            }
-        } catch (Throwable e) {
-            log("NETWORK GATE Q.a hook failed: " + e.getClass().getSimpleName()
-                    + ": " + String.valueOf(e.getMessage()));
-        }
-
         try {
             Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
             // H extends the actual j0 networking class. Hook the concrete
@@ -1865,3 +1798,282 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     });
         }
         log("preset hooks installed: " + preset.getName());
+    }
+
+    private static void installPresetHooks(
+            ClassLoader cl, Context context) {
+        try {
+            try {
+                Class<?> preset = Class.forName("r0.c", false, cl);
+                hookPresetProviderClass(preset, context);
+                return;
+            } catch (Throwable ignored) {
+                // Fall through to the lazy shape-based scan.
+            }
+
+            String apkPath = context.getApplicationInfo().sourceDir;
+            DexFile dex = new DexFile(apkPath);
+            try {
+                Enumeration<String> entries = dex.entries();
+                while (entries.hasMoreElements()) {
+                    String name = entries.nextElement();
+                    if (name.indexOf('.') < 0) {
+                        continue;
+                    }
+
+                    try {
+                        Class<?> candidate = Class.forName(name, false, cl);
+                        if (isPresetProviderClass(candidate)) {
+                            hookPresetProviderClass(candidate, context);
+                            return;
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            } finally {
+                dex.close();
+            }
+            log("preset provider class not found");
+        } catch (Throwable e) {
+            log("preset hook install failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void importYellowPageData(
+            ClassLoader cl, Context context, Class<?> dbHelperClass) {
+        try {
+            Object helper = XposedHelpers.callStaticMethod(
+                    dbHelperClass, "E", context);
+            SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
+                    helper, "getWritableDatabase");
+
+            Cursor c = null;
+            try {
+                c = db.rawQuery(
+                        "SELECT (SELECT COUNT(*) FROM yellow_page),"
+                                + " (SELECT COUNT(*) FROM phone_lookup)", null);
+                if (c.moveToFirst() && c.getInt(0) > 0 && c.getInt(1) > 0) {
+                    log("database ready; yellow_page=" + c.getInt(0)
+                            + ", phone_lookup=" + c.getInt(1));
+                    return;
+                }
+            } finally {
+                if (c != null) {
+                    c.close();
+                }
+            }
+
+            log("database incomplete; importing preset data");
+            installPresetHooks(cl, context);
+            XposedHelpers.callMethod(helper, "L", db);
+            XposedHelpers.callMethod(helper, "N", context, db);
+            log("preset import requested");
+        } catch (Throwable e) {
+            log("preset import failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void copyCursorValue(
+            Cursor source, int column, Object[] row) {
+        switch (source.getType(column)) {
+            case Cursor.FIELD_TYPE_NULL:
+                row[column] = null;
+                break;
+            case Cursor.FIELD_TYPE_INTEGER:
+                row[column] = source.getLong(column);
+                break;
+            case Cursor.FIELD_TYPE_FLOAT:
+                row[column] = source.getDouble(column);
+                break;
+            case Cursor.FIELD_TYPE_BLOB:
+                row[column] = source.getBlob(column);
+                break;
+            case Cursor.FIELD_TYPE_STRING:
+            default:
+                row[column] = source.getString(column);
+                break;
+        }
+    }
+
+    private static void installProviderHooks(
+            ClassLoader cl, Class<?> dbHelperClass) throws Throwable {
+        Class<?> providerClass = Class.forName(
+                "com.miui.yellowpage.providers.yellowpage.YellowPageProvider",
+                false, cl);
+
+        XposedHelpers.findAndHookMethod(
+                providerClass, "onCreate",
+                new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            Context context = (Context) XposedHelpers.callMethod(
+                                    param.thisObject, "getContext");
+                            log("YellowPageProvider.onCreate");
+                            hookYellowPagePullTask(cl, context);
+                            hookYellowPageJobServices(cl, context);
+                            hookPullTaskExecution(cl);
+                            hookYellowPageHttpDecision(cl);
+                            hookYellowPageNetworkGates(cl);
+                            hookYellowPageResponseParser(cl);
+                            hookYellowPageResponseSurface(cl);
+                            hookYellowPageStreamRequest(cl);
+                            hookYellowPageHttpBase(cl);
+                            hookYellowPageLiveHttp(cl);
+                            hookYellowPageDatabaseWrites(cl);
+                            hookPullTaskPipeline(cl, context);
+                            hookMeteredNetworkGuard(cl);
+                            hookJobDispatcher(cl, context);
+                            importYellowPageData(cl, context, dbHelperClass);
+                        } catch (Throwable e) {
+                            log("provider onCreate hook failed: "
+                                    + e.getClass().getSimpleName());
+                        }
+                    }
+                });
+
+        XposedHelpers.findAndHookMethod(
+                providerClass, "query",
+                android.net.Uri.class,
+                String[].class,
+                String.class,
+                String[].class,
+                String.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            return;
+                        }
+
+                        Cursor original = param.getResult() instanceof Cursor
+                                ? (Cursor) param.getResult() : null;
+                        if (original != null && original.getCount() > 0) {
+                            return;
+                        }
+
+                        try {
+                            if (original != null) {
+                                original.close();
+                            }
+                            param.setResult(null);
+
+                            android.net.Uri uri = (android.net.Uri) param.args[0];
+                            if (uri == null
+                                    || !"miui.yellowpage".equals(uri.getAuthority())
+                                    || uri.getPathSegments().size() != 2
+                                    || !"phone_lookup".equals(
+                                            uri.getPathSegments().get(0))) {
+                                return;
+                            }
+
+                            Context context = (Context) XposedHelpers.callMethod(
+                                    param.thisObject, "getContext");
+                            Object helper = XposedHelpers.callStaticMethod(
+                                    dbHelperClass, "E", context);
+                            SQLiteDatabase db = (SQLiteDatabase) XposedHelpers.callMethod(
+                                    helper, "getReadableDatabase");
+
+                            String number = uri.getLastPathSegment();
+                            String normalized = number;
+
+                            try {
+                                Class<?> normalizer = Class.forName(
+                                        "p022h0.e", false, cl);
+                                normalized = (String) XposedHelpers.callStaticMethod(
+                                        normalizer, "a", context, number);
+                            } catch (Throwable ignored) {
+                            }
+
+                            String table =
+                                    "((SELECT yid AS yellowpage_id, photo_url,thumbnail_url,tag,"
+                                    + "yellow_page_name,yellow_page_name_pinyin,tag_pinyin,number,"
+                                    + "normalized_number,min_match,hide,suspect,call_menu,t9_rank,"
+                                    + "atd_category_id,atd_count,atd_provider,flag,slogan,credit_img,"
+                                    + "number_type,provider_id FROM phone_lookup WHERE normalized_number = ?)"
+                                    + " INNER JOIN yellow_page ON yellowpage_id = yid)";
+
+                            Cursor recovery = db.query(
+                                    table, null, null, new String[]{normalized},
+                                    null, null, "update_time desc");
+
+                            if (recovery == null || !recovery.moveToFirst()) {
+                                if (recovery != null) {
+                                    recovery.close();
+                                }
+                                return;
+                            }
+
+                            String[] columns = recovery.getColumnNames();
+                            MatrixCursor matrix =
+                                    new MatrixCursor(columns, recovery.getCount());
+                            recovery.moveToPosition(-1);
+
+                            while (recovery.moveToNext()) {
+                                Object[] row = new Object[columns.length];
+                                for (int i = 0; i < columns.length; i++) {
+                                    copyCursorValue(recovery, i, row);
+                                }
+                                matrix.addRow(row);
+                            }
+
+                            int count = matrix.getCount();
+                            recovery.close();
+                            param.setResult(matrix);
+                            log("fallback lookup: " + number + " -> " + count + " row(s)");
+                        } catch (Throwable e) {
+                            log("fallback query failed: "
+                                    + e.getClass().getSimpleName());
+                        }
+                    }
+                });
+
+        log("YellowPageProvider hooks installed");
+    }
+
+    @Override
+    public void handleLoadPackage(
+            final XC_LoadPackage.LoadPackageParam lpparam) {
+        if ("com.android.contacts".equals(lpparam.packageName)) {
+            log("loaded in Contacts");
+            hookContactsGate(lpparam.classLoader, "i");
+            hookContactsGate(lpparam.classLoader, "j");
+            return;
+        }
+
+        if (!YELLOWPAGE.equals(lpparam.packageName)) {
+            return;
+        }
+
+        log("loaded in YellowPage");
+
+        try {
+            ClassLoader cl = lpparam.classLoader;
+
+            hookBooleanContextMethod(
+                    cl, "miui.yellowpage.YellowPageUtils",
+                    "isYellowPageAvailable");
+            hookBooleanContextMethod(
+                    cl, "miui.yellowpage.YellowPageUtils",
+                    "isYellowPageEnable");
+            hookYellowPageSyncGate(cl);
+            // Install the metered-network bypass immediately when Yellow Page loads,
+            // before Provider/JobService can start the pull pipeline.
+            hookMeteredNetworkGuard(cl);
+            // JobDispatcher is installed after a real application/provider context exists.
+            // The provider hook below also ensures the EEA pull-task gate is restored.
+            // Application context can be null this early in Zygote package loading.
+            // The provider hook below scans after a real YellowPage Context exists.
+            log("PullTask scan deferred until YellowPageProvider.onCreate");
+
+            Class<?> dbHelperClass = Class.forName(
+                    "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
+                    false, cl);
+
+            installProviderHooks(cl, dbHelperClass);
+        } catch (Throwable e) {
+            log("YellowPage initialization failed: "
+                    + e.getClass().getSimpleName());
+        }
+    }
+}
