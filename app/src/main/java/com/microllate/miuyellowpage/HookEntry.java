@@ -224,7 +224,10 @@ public class HookEntry implements IXposedHookLoadPackage {
         // UnknownContactActivity.Y0(number)
         // UnknownContactAtyFragment.Y2(number)
         hookContactsTarget(cl, "com.android.contacts.activities.UnknownContactActivity", "Y0");
+        hookContactsTargetNoArgs(cl, "com.android.contacts.activities.UnknownContactActivity", "X0");
+        hookContactsTargetNoArgs(cl, "com.android.contacts.activities.UnknownContactActivity", "Q0");
         hookContactsTarget(cl, "com.android.contacts.fragment.UnknownContactAtyFragment", "Y2");
+        hookContactsTargetNoArgs(cl, "com.android.contacts.fragment.UnknownContactAtyFragment", "X2");
 
         // Trace the actual loader creation and its obfuscated load method.
         hookContactsLoader(cl, "com.android.contacts.detail.yellowpage.YellowPagePhoneLoader");
@@ -241,7 +244,7 @@ public class HookEntry implements IXposedHookLoadPackage {
             Class<?> proxy = Class.forName("com.android.contacts.util.YellowPageProxy", false, cl);
             for (Method m : proxy.getDeclaredMethods()) {
                 String n = m.getName();
-                if ("j".equals(n) || "r".equals(n) || "q".equals(n)
+                if ("r".equals(n) || "q".equals(n)
                         || "o".equals(n) || "p".equals(n)) {
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
@@ -255,15 +258,9 @@ public class HookEntry implements IXposedHookLoadPackage {
                                         + m.getName() + "() THREW=" + param.getThrowable());
                             } else {
                                 Object result = param.getResult();
-                                if ("j".equals(m.getName())) {
-                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy.j() "
-                                            + String.valueOf(result) + " -> FORCED true");
-                                    param.setResult(true);
-                                } else {
-                                    XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
-                                            + m.getName() + "() EXIT result="
-                                            + String.valueOf(result));
-                                }
+                                XposedBridge.log(TAG + "CONTACTS YellowPageProxy."
+                                        + m.getName() + "() EXIT result="
+                                        + String.valueOf(result));
                             }
                         }
                     });
@@ -370,6 +367,26 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    private static void hookContactsTargetNoArgs(final ClassLoader cl, final String className, final String methodName) {
+        try {
+            Class<?> cls = Class.forName(className, false, cl);
+            for (Method m : cls.getDeclaredMethods()) {
+                if (!methodName.equals(m.getName()) || m.getParameterTypes().length != 0) continue;
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                        XposedBridge.log(TAG + "CONTACTS " + methodName + " ENTER");
+                    }
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        XposedBridge.log(TAG + "CONTACTS " + methodName + " EXIT result=" + String.valueOf(param.getResult()));
+                    }
+                });
+            }
+            XposedBridge.log(TAG + "CONTACTS noarg hook " + className + "." + methodName + " installed");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "CONTACTS noarg hook FAILED " + className + "." + methodName + ": " + t);
+        }
+    }
+
     private static void hookContactsLoader(final ClassLoader cl, final String className) {
         try {
             Class<?> cls = Class.forName(className, false, cl);
@@ -394,7 +411,7 @@ public class HookEntry implements IXposedHookLoadPackage {
 
             for (Method m : cls.getDeclaredMethods()) {
                 // CN smali shows J() as the loader's loadInBackground implementation.
-                if ("J".equals(m.getName()) || "loadInBackground".equals(m.getName())) {
+                if ("G".equals(m.getName()) || "J".equals(m.getName()) || "loadInBackground".equals(m.getName())) {
                     XposedBridge.hookMethod(m, new XC_MethodHook() {
                         @Override protected void beforeHookedMethod(MethodHookParam param) {
                             XposedBridge.log(TAG + "CONTACTS YellowPagePhoneLoader."
