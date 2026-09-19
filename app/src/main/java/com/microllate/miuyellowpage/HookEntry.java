@@ -859,6 +859,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 log("HTTP BASE CONNECTION: url="
                                         + String.valueOf(conn.getURL()));
                                 hookLiveHttpObject(conn);
+                                hookLiveHttpAllMethods(conn);
                             } catch (Throwable ignored) {
                             }
                         }
@@ -1022,6 +1023,54 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             }
         } catch (Throwable e) {
             log("LIVE object hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+
+    private static void hookLiveHttpAllMethods(Object connection) {
+        try {
+            if (connection == null) return;
+            Class<?> current = connection.getClass();
+            int depth = 0;
+            log("LIVE ALL CLASS: " + current.getName());
+
+            while (current != null && current != Object.class && depth < 6) {
+                for (Method method : current.getDeclaredMethods()) {
+                    final Method hookMethod = method;
+                    final String name = hookMethod.getName();
+                    if (hookMethod.isSynthetic() || hookMethod.isBridge()) continue;
+                    try {
+                        XposedBridge.hookMethod(hookMethod, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                log("LIVE ALL ENTER: " + name
+                                        + " args=" + formatHookArgs(param.args));
+                            }
+
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("LIVE ALL THROW: " + name + " "
+                                            + t.getClass().getName() + ": "
+                                            + String.valueOf(t.getMessage()));
+                                } else {
+                                    Object result = param.getResult();
+                                    String text = String.valueOf(result);
+                                    if (text.length() > 1200) text = text.substring(0, 1200);
+                                    log("LIVE ALL RESULT: " + name + " -> " + text);
+                                }
+                            }
+                        });
+                    } catch (Throwable ignored) {
+                    }
+                }
+                current = current.getSuperclass();
+                depth++;
+            }
+            log("LIVE ALL hooks installed");
+        } catch (Throwable e) {
+            log("LIVE ALL hook failed: " + e.getClass().getSimpleName());
         }
     }
 
