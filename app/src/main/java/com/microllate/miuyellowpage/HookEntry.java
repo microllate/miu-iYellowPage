@@ -858,6 +858,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                         (java.net.HttpURLConnection) result;
                                 log("HTTP BASE CONNECTION: url="
                                         + String.valueOf(conn.getURL()));
+                                hookLiveHttpObject(conn);
                             } catch (Throwable ignored) {
                             }
                         }
@@ -942,6 +943,85 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             log("LIVE HTTP hooks installed: " + found);
         } catch (Throwable e) {
             log("LIVE HTTP hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+
+    private static void hookLiveHttpObject(Object connection) {
+        try {
+            if (connection == null) return;
+            final Class<?> cls = connection.getClass();
+            log("LIVE OBJECT CLASS: " + cls.getName());
+
+            Class<?> current = cls;
+            int depth = 0;
+            while (current != null && current != Object.class && depth < 5) {
+                for (Method method : current.getDeclaredMethods()) {
+                    final String name = method.getName();
+                    if (!"connect".equals(name)
+                            && !"getResponseCode".equals(name)
+                            && !"getResponseMessage".equals(name)
+                            && !"getInputStream".equals(name)
+                            && !"getErrorStream".equals(name)) {
+                        continue;
+                    }
+                    if (method.getParameterTypes().length != 0) continue;
+
+                    try {
+                        XposedBridge.hookMethod(method, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                try {
+                                    java.net.HttpURLConnection c =
+                                            (java.net.HttpURLConnection) param.thisObject;
+                                    log("LIVE OBJECT ENTER: " + name
+                                            + " url=" + String.valueOf(c.getURL()));
+                                } catch (Throwable e) {
+                                    log("LIVE OBJECT ENTER: " + name);
+                                }
+                            }
+
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("LIVE OBJECT THROW: " + name + " "
+                                            + t.getClass().getName() + ": "
+                                            + String.valueOf(t.getMessage()));
+                                    return;
+                                }
+
+                                Object result = param.getResult();
+                                String text = String.valueOf(result);
+                                if (text.length() > 2000) text = text.substring(0, 2000);
+                                log("LIVE OBJECT RESULT: " + name + " -> " + text
+                                        + " class=" + (result == null
+                                        ? "null" : result.getClass().getName()));
+
+                                if ("getResponseCode".equals(name)) {
+                                    try {
+                                        java.net.HttpURLConnection c =
+                                                (java.net.HttpURLConnection) param.thisObject;
+                                        log("LIVE RESPONSE: code=" + c.getResponseCode()
+                                                + " message=" + c.getResponseMessage()
+                                                + " contentType=" + c.getContentType()
+                                                + " length=" + c.getContentLengthLong());
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+                            }
+                        });
+                        log("hooked LIVE OBJECT: " + current.getName() + "." + name);
+                    } catch (Throwable e) {
+                        log("LIVE OBJECT hook failed: " + current.getName() + "." + name
+                                + " " + e.getClass().getSimpleName());
+                    }
+                }
+                current = current.getSuperclass();
+                depth++;
+            }
+        } catch (Throwable e) {
+            log("LIVE object hook failed: " + e.getClass().getSimpleName());
         }
     }
 
