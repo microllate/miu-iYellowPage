@@ -354,6 +354,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             Context context = (Context) XposedHelpers.callMethod(
                                     param.thisObject, "getContext");
                             log("YellowPageProvider.onCreate");
+                            hookYellowPagePullTask(cl, context);
                             importYellowPageData(cl, context, dbHelperClass);
                         } catch (Throwable e) {
                             log("provider onCreate hook failed: "
@@ -487,14 +488,9 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     cl, "miui.yellowpage.YellowPageUtils",
                     "isYellowPageEnable");
             hookYellowPageSyncGate(cl);
-            Context appContext = null;
-            try {
-                Class<?> activityThread = Class.forName("android.app.ActivityThread");
-                appContext = (Context) XposedHelpers.callStaticMethod(
-                        activityThread, "currentApplication");
-            } catch (Throwable ignored) {
-            }
-            hookYellowPagePullTask(cl, appContext);
+            // Application context can be null this early in Zygote package loading.
+            // The provider hook below scans after a real YellowPage Context exists.
+            log("PullTask scan deferred until YellowPageProvider.onCreate");
 
             Class<?> dbHelperClass = Class.forName(
                     "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
