@@ -163,6 +163,78 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     }
 
 
+    private static void hookJobDispatcher(ClassLoader cl) {
+        try {
+            Class<?> dispatcher = Class.forName("a0.C0166b", false, cl);
+
+            // EEA disables pull_task_job through i.f(Context). Restore only
+            // the Yellow Page pull job gate; leave the other jobs untouched.
+            for (Method method : dispatcher.getDeclaredMethods()) {
+                if (!"a".equals(method.getName())
+                        || !Modifier.isStatic(method.getModifiers())
+                        || method.getReturnType() != Boolean.TYPE) {
+                    continue;
+                }
+
+                Class<?>[] p = method.getParameterTypes();
+                if (p.length != 2 || p[0] != Context.class || p[1] != Integer.TYPE) {
+                    continue;
+                }
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        int jobId = (Integer) param.args[1];
+                        if (jobId == 0) {
+                            log("JobDispatcher.canScheduleJob: pull_task_job -> true");
+                            param.setResult(true);
+                        }
+                    }
+                });
+                log("hooked JobDispatcher.canScheduleJob(Context,int)");
+            }
+
+            // Log the actual scheduling call so we can verify that JobScheduler
+            // receives pull_task_job after the gate is restored.
+            for (Method method : dispatcher.getDeclaredMethods()) {
+                if (!"e".equals(method.getName())
+                        || !Modifier.isStatic(method.getModifiers())
+                        || method.getReturnType() != Void.TYPE) {
+                    continue;
+                }
+
+                Class<?>[] p = method.getParameterTypes();
+                if (p.length != 3
+                        || p[0] != Context.class
+                        || p[1] != Integer.TYPE
+                        || p[2] != Boolean.TYPE) {
+                    continue;
+                }
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        int jobId = (Integer) param.args[1];
+                        if (jobId == 0) {
+                            log("JobDispatcher.scheduleJob ENTER: pull_task_job");
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        int jobId = (Integer) param.args[1];
+                        if (jobId == 0) {
+                            log("JobDispatcher.scheduleJob EXIT: pull_task_job");
+                        }
+                    }
+                });
+                log("hooked JobDispatcher.scheduleJob(Context,int,boolean)");
+            }
+        } catch (Throwable e) {
+            log("JobDispatcher hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookYellowPageJobServices(ClassLoader cl, Context context) {
         try {
             int found = 0;
@@ -438,6 +510,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                     param.thisObject, "getContext");
                             log("YellowPageProvider.onCreate");
                             hookYellowPagePullTask(cl, context);
+                            hookJobDispatcher(cl);
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
                             importYellowPageData(cl, context, dbHelperClass);
@@ -573,6 +646,8 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     cl, "miui.yellowpage.YellowPageUtils",
                     "isYellowPageEnable");
             hookYellowPageSyncGate(cl);
+            // JobDispatcher is installed after a real application/provider context exists.
+            // The provider hook below also ensures the EEA pull-task gate is restored.
             // Application context can be null this early in Zygote package loading.
             // The provider hook below scans after a real YellowPage Context exists.
             log("PullTask scan deferred until YellowPageProvider.onCreate");
