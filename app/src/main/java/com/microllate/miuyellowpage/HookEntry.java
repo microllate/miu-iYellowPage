@@ -364,8 +364,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             Class<?> cls = Class.forName("o0.g", false, cl);
             log("PullTask class found: " + cls.getName());
 
-            // Trace every method in o0.g. The previous hook only traced y(),
-            // but y() may delegate the actual pull to another method.
             for (Method method : cls.getDeclaredMethods()) {
                 final String methodName = method.getName();
                 final Class<?> returnType = method.getReturnType();
@@ -384,11 +382,17 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             log("PullTask o0.g THROW: " + methodName
                                     + " " + t.getClass().getName() + ": " + t.getMessage());
                         } else {
-                            String result = String.valueOf(param.getResult());
-                            if (result.length() > 300) {
-                                result = result.substring(0, 300);
+                            Object result = param.getResult();
+                            String text = String.valueOf(result);
+                            if (text.length() > 300) text = text.substring(0, 300);
+                            log("PullTask o0.g RESULT: " + methodName + "=" + text);
+
+                            // o0.g.j(...) returns H. The actual network/data work
+                            // appears to continue on that returned object, so hook
+                            // its concrete methods when j() returns an object.
+                            if ("j".equals(methodName) && result != null) {
+                                hookReturnedPullObject(result);
                             }
-                            log("PullTask o0.g RESULT: " + methodName + "=" + result);
                         }
                     }
                 });
@@ -399,6 +403,79 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             }
         } catch (Throwable e) {
             log("PullTask execution hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void hookReturnedPullObject(Object target) {
+        try {
+            final Class<?> cls = target.getClass();
+            log("PullTask returned object class: " + cls.getName());
+
+            for (Method method : cls.getDeclaredMethods()) {
+                final String methodName = method.getName();
+                final Class<?> returnType = method.getReturnType();
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("PullTask returned ENTER: " + cls.getName() + "." + methodName
+                                + " args=" + (param.args == null ? 0 : param.args.length));
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("PullTask returned THROW: " + methodName
+                                    + " " + t.getClass().getName() + ": " + t.getMessage());
+                        } else {
+                            String text = String.valueOf(param.getResult());
+                            if (text.length() > 500) text = text.substring(0, 500);
+                            log("PullTask returned RESULT: " + methodName + "=" + text);
+                        }
+                    }
+                });
+
+                log("hooked PullTask returned method: " + cls.getName() + "."
+                        + methodName + "(" + method.getParameterTypes().length
+                        + " args) -> " + returnType.getSimpleName());
+            }
+
+            // Also inspect one superclass: obfuscated networking helpers often
+            // inherit the real request/response method from a base class.
+            Class<?> parent = cls.getSuperclass();
+            if (parent != null && parent != Object.class) {
+                for (Method method : parent.getDeclaredMethods()) {
+                    final String methodName = method.getName();
+                    final Class<?> returnType = method.getReturnType();
+
+                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            log("PullTask returned BASE ENTER: " + parent.getName() + "."
+                                    + methodName);
+                        }
+
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                Throwable t = param.getThrowable();
+                                log("PullTask returned BASE THROW: " + methodName + " "
+                                        + t.getClass().getName() + ": " + t.getMessage());
+                            } else {
+                                log("PullTask returned BASE RESULT: " + methodName + "="
+                                        + String.valueOf(param.getResult()));
+                            }
+                        }
+                    });
+
+                    log("hooked PullTask returned base method: " + parent.getName() + "."
+                            + methodName + "(" + method.getParameterTypes().length
+                            + " args) -> " + returnType.getSimpleName());
+                }
+            }
+        } catch (Throwable e) {
+            log("PullTask returned-object hook failed: " + e.getClass().getSimpleName());
         }
     }
 
