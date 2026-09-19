@@ -2529,6 +2529,34 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         log("YellowPageProvider hooks installed");
     }
 
+
+    private static void hookYellowPageWStatus(ClassLoader cl) {
+        try {
+            Class<?> hClass = Class.forName("com.miui.yellowpage.utils.H", false, cl);
+            Method w = hClass.getDeclaredMethod("w");
+            if (w.getReturnType() != Integer.TYPE || w.getParameterTypes().length != 0) {
+                log("H.w() shape unexpected");
+                return;
+            }
+            XposedBridge.hookMethod(w, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.hasThrowable()) return;
+                    Object result = param.getResult();
+                    if (result instanceof Integer && ((Integer) result) == 3) {
+                        log("H.w STATUS: 3 -> 0 (diagnostic bypass)");
+                        param.setResult(0);
+                    } else {
+                        log("H.w STATUS: " + String.valueOf(result));
+                    }
+                }
+            });
+            log("hooked com.miui.yellowpage.utils.H.w()");
+        } catch (Throwable e) {
+            log("H.w hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     @Override
     public void handleLoadPackage(
             final XC_LoadPackage.LoadPackageParam lpparam) {
@@ -2549,6 +2577,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             ClassLoader cl = lpparam.classLoader;
             log("YELLOWPAGE LOAD ENTER classLoader=" + String.valueOf(cl));
             hookYellowPageRequestMode(cl);
+            hookYellowPageWStatus(cl);
             hookYellowPageActualRequestBuilder(cl);
             hookGlobalHttpsConnection(cl);
             try {
