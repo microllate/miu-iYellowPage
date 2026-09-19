@@ -237,6 +237,8 @@ public class HookEntry implements IXposedHookLoadPackage {
         hookContactsMethod(cl, "com.android.contacts.detail.ContactLoaderFragment$YellowPageLoader", "run");
         hookContactsMethod(cl, "com.android.contacts.activities.UnknownContactActivity$2", "b0");
         hookContactsMethod(cl, "com.android.contacts.fragment.UnknownContactAtyFragment$5", "b0");
+        hookContactsMethod(cl, "com.android.contacts.activities.QuickContactActivity$3", "b");
+        hookContactsMethod(cl, "com.android.contacts.activities.QuickContactActivity", "O1");
         XposedBridge.log(TAG + "CONTACTS exact Yellow Page caller hooks installed");
 
         // Trace the Contacts-side proxy calls. Do not change any result here.
