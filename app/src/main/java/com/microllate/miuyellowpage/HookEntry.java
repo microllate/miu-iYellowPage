@@ -2077,6 +2077,50 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+    private static void hookYellowPagePostResponsePipeline(ClassLoader cl) {
+        String[] classes = {"o0.d", "n0.d"};
+        for (String name : classes) {
+            try {
+                Class<?> c = Class.forName(name, false, cl);
+                int hooked = 0;
+                for (Method m : c.getDeclaredMethods()) {
+                    String mn = m.getName();
+                    if (!(("o0.d".equals(name) && ("k".equals(mn) || "z".equals(mn)))
+                            || ("n0.d".equals(name) && "a".equals(mn)))) {
+                        continue;
+                    }
+                    final String methodName = name + "." + mn;
+                    XposedBridge.hookMethod(m, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            log("POST PIPE ENTER: " + methodName
+                                    + " args=" + formatHookArgs(param.args));
+                        }
+
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                log("POST PIPE THROW: " + methodName + " "
+                                        + param.getThrowable().getClass().getSimpleName());
+                            } else {
+                                log("POST PIPE RESULT: " + methodName
+                                        + " -> " + String.valueOf(param.getResult())
+                                        + " class=" + (param.getResult() == null
+                                        ? "null" : param.getResult().getClass().getName()));
+                            }
+                        }
+                    });
+                    hooked++;
+                }
+                log("hooked YellowPage post-response pipeline: " + name
+                        + " methods=" + hooked);
+            } catch (Throwable e) {
+                log("post-response hook failed: " + name + " "
+                        + e.getClass().getSimpleName());
+            }
+        }
+    }
+
     private static void hookPullTaskPipeline(ClassLoader cl, Context context) {
         try {
             // Job 0 does not call PullTask.y() directly. The real chain is:
@@ -2360,6 +2404,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPageHttpBase(cl);
                             hookYellowPageLiveHttp(cl);
                             hookYellowPageDatabaseWrites(cl);
+        hookYellowPagePostResponsePipeline(cl);
                             hookPullTaskPipeline(cl, context);
                             hookMeteredNetworkGuard(cl);
                             hookJobDispatcher(cl, context);
