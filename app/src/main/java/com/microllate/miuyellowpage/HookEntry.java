@@ -3526,21 +3526,6 @@ public class HookEntry implements IXposedHookLoadPackage {
             hookYellowPageRegionParam(cl);
             hookYellowPageDataDecode(cl);
             hookYellowPageDownload(cl);
-            hookGlobalHttpsConnection(cl);
-            try {
-                log("CRITICAL CALL BEFORE");
-                hookCriticalYellowPageGates(cl);
-                log("CRITICAL CALL AFTER");
-            } catch (Throwable e) {
-                log("CRITICAL CALL THROW: " + e.getClass().getName()
-                        + ": " + String.valueOf(e.getMessage()));
-                Throwable cause = e.getCause();
-                if (cause != null) {
-                    log("CRITICAL CALL CAUSE: " + cause.getClass().getName()
-                            + ": " + String.valueOf(cause.getMessage()));
-                }
-            }
-
             hookBooleanContextMethod(
                     cl, "miui.yellowpage.YellowPageUtils",
                     "isYellowPageAvailable");
