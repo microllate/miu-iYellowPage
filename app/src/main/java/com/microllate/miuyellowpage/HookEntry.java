@@ -50,7 +50,38 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
-    private static void hookContactsGate(
+        private static void hookYellowPageSyncGate(ClassLoader cl) {
+        try {
+            Class<?> feature = Class.forName("c0.b", false, cl);
+            Class<?> enumClass = Class.forName("c0.a", false, cl);
+            Object sync = Enum.valueOf((Class<Enum>) enumClass.asSubclass(Enum.class), "YELLOWPAGE_SYNC");
+            for (Method method : feature.getDeclaredMethods()) {
+                Class<?>[] p = method.getParameterTypes();
+                if (!Modifier.isStatic(method.getModifiers())
+                        || method.getReturnType() != Boolean.TYPE
+                        || p.length != 2
+                        || p[0] != Context.class
+                        || p[1] != enumClass) {
+                    continue;
+                }
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.args[1] == sync) {
+                            param.setResult(true);
+                        }
+                    }
+                });
+                log("hooked YELLOWPAGE_SYNC feature gate");
+                return;
+            }
+            log("YELLOWPAGE_SYNC feature gate method not found");
+        } catch (Throwable e) {
+            log("YELLOWPAGE_SYNC hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+private static void hookContactsGate(
             ClassLoader cl, String methodName) {
         try {
             Class<?> proxy = Class.forName(
@@ -374,6 +405,7 @@ public class HookEntry implements IXposedHookLoadPackage {
             hookBooleanContextMethod(
                     cl, "miui.yellowpage.YellowPageUtils",
                     "isYellowPageEnable");
+            hookYellowPageSyncGate(cl);
 
             Class<?> dbHelperClass = Class.forName(
                     "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
