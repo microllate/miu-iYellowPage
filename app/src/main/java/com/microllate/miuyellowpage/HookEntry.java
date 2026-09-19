@@ -3355,18 +3355,10 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             log("YellowPageProvider.onCreate");
                             hookYellowPagePullTask(cl, context);
                             hookYellowPageJobServices(cl, context);
-                            hookPullTaskExecution(cl);
-                            hookYellowPageHttpDecision(cl);
                             hookYellowPageNetworkGates(cl);
-                            hookYellowPageResponseParser(cl);
-                            hookYellowPageResponseSurface(cl);
                             hookYellowPageStreamUtility(cl);
-                            hookYellowPageStreamRequest(cl);
-                            hookYellowPageHttpBase(cl);
-                            hookYellowPageLiveHttp(cl);
                             hookYellowPageDatabaseWrites(cl);
         hookYellowPagePostResponsePipeline(cl);
-                            hookPullTaskPipeline(cl, context);
                             hookMeteredNetworkGuard(cl);
                             hookJobDispatcher(cl, context);
                             importYellowPageData(cl, context, dbHelperClass);
