@@ -364,11 +364,12 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             Class<?> cls = Class.forName("o0.g", false, cl);
             log("PullTask class found: " + cls.getName());
 
-            // Trace every method in o0.g. The previous hook only traced y(), but
-            // y() is a coordinator and may delegate the actual pull to d/g/h/i/j/l.
+            // Trace every method in o0.g. The previous hook only traced y(),
+            // but y() may delegate the actual pull to another method.
             for (Method method : cls.getDeclaredMethods()) {
                 final String methodName = method.getName();
                 final Class<?> returnType = method.getReturnType();
+
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
@@ -378,105 +379,23 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
-                        Throwable t = param.getThrowable();
-                        if (t != null) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
                             log("PullTask o0.g THROW: " + methodName
                                     + " " + t.getClass().getName() + ": " + t.getMessage());
                         } else {
                             String result = String.valueOf(param.getResult());
-                            if (result.length() > 300) result = result.substring(0, 300);
+                            if (result.length() > 300) {
+                                result = result.substring(0, 300);
+                            }
                             log("PullTask o0.g RESULT: " + methodName + "=" + result);
                         }
                     }
                 });
+
                 log("hooked PullTask o0.g method: " + methodName
                         + "(" + method.getParameterTypes().length + " args) -> "
                         + returnType.getSimpleName());
-            }
-
-            // Also trace the standard Java HTTP path used by many Xiaomi builds.
-            try {
-                Class<?> url = Class.forName("java.net.URL", false, cl);
-                Method open = url.getDeclaredMethod("openConnection");
-                XposedBridge.hookMethod(open, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        try {
-                            log("HTTP openConnection: " + String.valueOf(param.thisObject));
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                });
-                log("hooked java.net.URL.openConnection()");
-            } catch (Throwable e) {
-                log("HTTP URL hook failed: " + e.getClass().getSimpleName());
-            }
-
-            try {
-                Class<?> http = Class.forName("java.net.HttpURLConnection", false, cl);
-                Method response = http.getDeclaredMethod("getResponseCode");
-                XposedBridge.hookMethod(response, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        try {
-                            log("HTTP responseCode: " + param.getResult()
-                                    + " url=" + String.valueOf(param.thisObject.getURL()));
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                });
-                Method connect = http.getDeclaredMethod("connect");
-                XposedBridge.hookMethod(connect, new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        try {
-                            log("HTTP connect: " + String.valueOf(param.thisObject.getURL()));
-                        } catch (Throwable ignored) {
-                        }
-                    }
-                });
-                log("hooked HttpURLConnection.connect/getResponseCode");
-            } catch (Throwable e) {
-                log("HTTP HttpURLConnection hooks failed: " + e.getClass().getSimpleName());
-            }
-
-            // OkHttp is commonly used by MIUI Yellow Page. Hook the concrete
-            // RealCall methods when present, without making OkHttp a hard dependency.
-            try {
-                Class<?> realCall = Class.forName("okhttp3.RealCall", false, cl);
-                for (Method method : realCall.getDeclaredMethods()) {
-                    if (!"execute".equals(method.getName()) && !"enqueue".equals(method.getName())) {
-                        continue;
-                    }
-                    final String name = method.getName();
-                    XposedBridge.hookMethod(method, new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            try {
-                                Method request = realCall.getDeclaredMethod("request");
-                                Object req = request.invoke(param.thisObject);
-                                log("OkHttp " + name + " ENTER: " + String.valueOf(req));
-                            } catch (Throwable ignored) {
-                                log("OkHttp " + name + " ENTER");
-                            }
-                        }
-
-                        @Override
-                        protected void afterHookedMethod(MethodHookParam param) {
-                            Throwable t = param.getThrowable();
-                            if (t != null) {
-                                log("OkHttp " + name + " THROW: "
-                                        + t.getClass().getName() + ": " + t.getMessage());
-                            } else {
-                                log("OkHttp " + name + " RESULT: "
-                                        + String.valueOf(param.getResult()));
-                            }
-                        }
-                    });
-                    log("hooked OkHttp RealCall." + name + "()");
-                }
-            } catch (Throwable e) {
-                log("OkHttp hook skipped: " + e.getClass().getSimpleName());
             }
         } catch (Throwable e) {
             log("PullTask execution hook failed: " + e.getClass().getSimpleName());
