@@ -430,68 +430,76 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 return;
             }
 
-            final String url;
-            try {
-                url = String.valueOf(connection.getURL());
-            } catch (Throwable ignored) {
-                return;
+            final Class<?> connectionClass = connection.getClass();
+            log("HTTP LIVE CLASS: " + connectionClass.getName());
+
+            int hooked = 0;
+            for (Method method : connectionClass.getMethods()) {
+                String name = method.getName();
+                Class<?>[] params = method.getParameterTypes();
+
+                if ((("getResponseCode".equals(name) || "getInputStream".equals(name)
+                        || "getErrorStream".equals(name))
+                        && params.length == 0)) {
+
+                    final String methodName = name;
+                    try {
+                        XposedBridge.hookMethod(method, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                log("HTTP LIVE " + methodName + " ENTER url=" + safeConnectionUrl(param.thisObject));
+                            }
+
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("HTTP LIVE " + methodName + " THROW "
+                                            + t.getClass().getName() + ": "
+                                            + String.valueOf(t.getMessage()));
+                                } else {
+                                    Object result = param.getResult();
+                                    String resultText;
+                                    if (result == null) {
+                                        resultText = "null";
+                                    } else {
+                                        resultText = result.getClass().getName() + ":" + String.valueOf(result);
+                                        if (resultText.length() > 500) {
+                                            resultText = resultText.substring(0, 500);
+                                        }
+                                    }
+                                    log("HTTP LIVE " + methodName + " RESULT " + resultText);
+                                }
+                            }
+                        });
+                        hooked++;
+                        log("hooked HTTP LIVE method: " + connectionClass.getName()
+                                + "." + methodName + "()");
+                    } catch (Throwable e) {
+                        log("HTTP LIVE hook failed " + methodName + ": "
+                                + e.getClass().getName());
+                    }
+                }
             }
 
-            log("HTTP RESPONSE HOOK: " + url);
-
-            try {
-                int code = connection.getResponseCode();
-                log("HTTP RESPONSE CODE: " + code + " url=" + url);
-            } catch (Throwable e) {
-                log("HTTP RESPONSE CODE THROW: " + e.getClass().getName()
-                        + ": " + String.valueOf(e.getMessage()));
-            }
-
-            try {
-                java.io.InputStream stream;
-                try {
-                    stream = connection.getInputStream();
-                } catch (Throwable inputError) {
-                    log("HTTP INPUTSTREAM THROW: " + inputError.getClass().getName()
-                            + ": " + String.valueOf(inputError.getMessage()));
-                    stream = connection.getErrorStream();
-                }
-
-                if (stream == null) {
-                    log("HTTP RESPONSE BODY: <null stream>");
-                    return;
-                }
-
-                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-                byte[] buffer = new byte[4096];
-                int total = 0;
-                int read;
-
-                while (total < 16384
-                        && (read = stream.read(buffer, 0,
-                        Math.min(buffer.length, 16384 - total))) != -1) {
-                    out.write(buffer, 0, read);
-                    total += read;
-                }
-
-                stream.close();
-
-                String body = new String(out.toByteArray(),
-                        java.nio.charset.StandardCharsets.UTF_8);
-                log("HTTP RESPONSE BODY length=" + body.length());
-                if (body.length() > 8000) {
-                    body = body.substring(0, 8000);
-                }
-                log("HTTP RESPONSE BODY DATA: " + body);
-            } catch (Throwable e) {
-                log("HTTP RESPONSE BODY THROW: " + e.getClass().getName()
-                        + ": " + String.valueOf(e.getMessage()));
-            }
+            log("HTTP LIVE hooks installed=" + hooked
+                    + " class=" + connectionClass.getName());
         } catch (Throwable e) {
-            log("HTTP RESPONSE HOOK THROW: " + e.getClass().getName()
+            log("HTTP LIVE hook install THROW: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
         }
     }
+
+    private static String safeConnectionUrl(Object object) {
+        try {
+            if (object instanceof java.net.HttpURLConnection) {
+                return String.valueOf(((java.net.HttpURLConnection) object).getURL());
+            }
+        } catch (Throwable ignored) {
+        }
+        return "<unknown>";
+    }
+
 
     private static void probeHNetworkCall(Object hObject) {
         try {
