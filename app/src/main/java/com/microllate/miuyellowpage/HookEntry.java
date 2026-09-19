@@ -163,7 +163,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     }
 
 
-    private static void hookJobDispatcher(ClassLoader cl) {
+    private static void hookJobDispatcher(ClassLoader cl, Context context) {
         try {
             Class<?> dispatcher = null;
 
@@ -179,21 +179,14 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
             if (dispatcher == null) {
                 java.util.ArrayList<String> paths = new java.util.ArrayList<>();
-                try {
-                    android.content.Context app = (android.content.Context)
-                            XposedHelpers.callStaticMethod(
-                                    Class.forName("android.app.ActivityThread", false, cl),
-                                    "currentApplication");
-                    if (app != null) {
-                        paths.add(app.getApplicationInfo().sourceDir);
-                        String[] splits = app.getApplicationInfo().splitSourceDirs;
-                        if (splits != null) {
-                            for (String split : splits) {
-                                if (split != null && !paths.contains(split)) paths.add(split);
-                            }
+                if (context != null) {
+                    paths.add(context.getApplicationInfo().sourceDir);
+                    String[] splits = context.getApplicationInfo().splitSourceDirs;
+                    if (splits != null) {
+                        for (String split : splits) {
+                            if (split != null && !paths.contains(split)) paths.add(split);
                         }
                     }
-                } catch (Throwable ignored) {
                 }
 
                 for (String apkPath : paths) {
@@ -591,9 +584,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPagePullTask(cl, context);
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
-                            hookJobDispatcher(cl);
-                            hookYellowPageJobServices(cl, context);
-                            hookPullTaskExecution(cl);
+                            hookJobDispatcher(cl, context);
                             importYellowPageData(cl, context, dbHelperClass);
                         } catch (Throwable e) {
                             log("provider onCreate hook failed: "
