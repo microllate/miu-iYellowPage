@@ -424,6 +424,69 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     }
 
 
+    private static void hookConcreteHttpResponse(Object connection) {
+        try {
+            if (connection == null) return;
+            Class<?> current = connection.getClass();
+            int depth = 0;
+            int found = 0;
+            log("HTTP CONCRETE START: " + current.getName());
+            while (current != null && current != Object.class && depth < 8) {
+                for (Method method : current.getDeclaredMethods()) {
+                    final String name = method.getName();
+                    if (!("connect".equals(name)
+                            || "getResponseCode".equals(name)
+                            || "getResponseMessage".equals(name)
+                            || "getInputStream".equals(name)
+                            || "getErrorStream".equals(name)
+                            || "getContent".equals(name)
+                            || "disconnect".equals(name))) {
+                        continue;
+                    }
+                    if (method.getParameterTypes().length != 0) continue;
+                    try {
+                        XposedBridge.hookMethod(method, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                log("HTTP CONCRETE ENTER: " + name
+                                        + " class=" + param.thisObject.getClass().getName());
+                            }
+
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("HTTP CONCRETE THROW: " + name + " "
+                                            + t.getClass().getName() + ": "
+                                            + String.valueOf(t.getMessage()));
+                                    return;
+                                }
+                                Object result = param.getResult();
+                                String value = String.valueOf(result);
+                                if (value.length() > 1200) value = value.substring(0, 1200);
+                                log("HTTP CONCRETE RESULT: " + name + " -> " + value
+                                        + " resultClass="
+                                        + (result == null ? "null" : result.getClass().getName()));
+                            }
+                        });
+                        found++;
+                        log("HTTP CONCRETE HOOKED: " + current.getName() + "." + name);
+                    } catch (Throwable e) {
+                        log("HTTP CONCRETE HOOK FAILED: " + current.getName() + "."
+                                + name + " " + e.getClass().getName() + ": "
+                                + String.valueOf(e.getMessage()));
+                    }
+                }
+                current = current.getSuperclass();
+                depth++;
+            }
+            log("HTTP CONCRETE INSTALLED: " + found);
+        } catch (Throwable e) {
+            log("HTTP CONCRETE START FAILED: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookHConnectionResponse(java.net.HttpURLConnection connection) {
         try {
             if (connection == null) {
@@ -647,6 +710,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                     }
                                     // Install hooks on the exact concrete connection
                                     // object/class returned by the real j0.d() call.
+                                    hookConcreteHttpResponse(connection);
                                     hookHConnectionResponse(connection);
                                 }
                             }
