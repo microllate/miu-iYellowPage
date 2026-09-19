@@ -101,31 +101,6 @@ public class HookEntry implements IXposedHookLoadPackage {
                         if (!param.hasThrowable() && Boolean.FALSE.equals(param.getResult())) {
                             param.setResult(true);
                         }
-                        if (!param.hasThrowable() && Boolean.TRUE.equals(param.getResult())) {
-                            try {
-                                Context ctx = param.args != null && param.args.length > 0
-                                        && param.args[0] instanceof Context
-                                        ? (Context) param.args[0] : null;
-                                if (ctx != null) {
-                                    Class<?> dbHelper = Class.forName(
-                                            "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
-                                            false, cl);
-                                    Object helper = XposedHelpers.callStaticMethod(
-                                            dbHelper, "E", ctx);
-                                    android.database.sqlite.SQLiteDatabase db =
-                                            (android.database.sqlite.SQLiteDatabase)
-                                                    XposedHelpers.callMethod(
-                                                            helper, "getWritableDatabase");
-                                    Class<?> preset = Class.forName("f0.h", false, cl);
-                                    XposedHelpers.callStaticMethod(preset, "a", ctx, db);
-                                    log("DATA IMPORT TRIGGER: f0.h.a() invoked after sync");
-                                }
-                            } catch (Throwable e) {
-                                log("DATA IMPORT TRIGGER FAILED: "
-                                        + e.getClass().getSimpleName() + ": "
-                                        + String.valueOf(e.getMessage()));
-                            }
-                        }
                     }
                 });
                 log("PullTask gate hooked: o0.g.y(Context)");
@@ -137,34 +112,6 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
-    private static void hookYellowPageDataCommitDecision(ClassLoader cl) {
-        try {
-            Class<?> cls = Class.forName("o0.g", false, cl);
-            for (Method method : cls.getDeclaredMethods()) {
-                Class<?>[] p = method.getParameterTypes();
-                if (!"t".equals(method.getName())
-                        || method.getReturnType() != Boolean.TYPE
-                        || p.length != 2
-                        || p[0] != Context.class
-                        || p[1] != String.class) {
-                    continue;
-                }
-                XposedBridge.hookMethod(method, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) {
-                        if (!param.hasThrowable() && Boolean.FALSE.equals(param.getResult())) {
-                            param.setResult(true);
-                        }
-                    }
-                });
-                log("Data commit gate hooked: o0.g.t(Context,String)");
-                return;
-            }
-            log("Data commit gate o0.g.t(Context,String) not found");
-        } catch (Throwable e) {
-            log("Data commit gate hook failed: " + e.getClass().getSimpleName());
-        }
-    }
 
     private static void hookJobDispatcher(ClassLoader cl, Context context) {
         try {
@@ -3358,7 +3305,6 @@ public class HookEntry implements IXposedHookLoadPackage {
                                     param.thisObject, "getContext");
                             log("YellowPageProvider.onCreate");
                             hookYellowPagePullTask(cl, context);
-                            hookYellowPageDataCommitDecision(cl);
                             hookYellowPageJobServices(cl, context);
                             hookYellowPageNetworkGates(cl);
                             hookYellowPageStreamUtility(cl);
