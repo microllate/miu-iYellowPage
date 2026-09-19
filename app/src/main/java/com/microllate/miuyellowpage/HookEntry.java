@@ -882,6 +882,9 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     cl, "miui.yellowpage.YellowPageUtils",
                     "isYellowPageEnable");
             hookYellowPageSyncGate(cl);
+            // Install the metered-network bypass immediately when Yellow Page loads,
+            // before Provider/JobService can start the pull pipeline.
+            hookMeteredNetworkGuard(cl);
             // JobDispatcher is installed after a real application/provider context exists.
             // The provider hook below also ensures the EEA pull-task gate is restored.
             // Application context can be null this early in Zygote package loading.
