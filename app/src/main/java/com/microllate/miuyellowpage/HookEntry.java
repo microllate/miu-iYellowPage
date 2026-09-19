@@ -1118,6 +1118,139 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     }
 
 
+
+    private static void hookYellowPageResponseSurface(ClassLoader cl) {
+        try {
+            Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
+            int found = 0;
+            for (Method method : http.getDeclaredMethods()) {
+                final String name = method.getName();
+                if (!"A".equals(name) || method.getParameterTypes().length != 0) {
+                    continue;
+                }
+                if (method.getReturnType() != String.class
+                        && method.getReturnType() != byte[].class) {
+                    continue;
+                }
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("HTTP RESPONSE SURFACE ENTER: H." + name + "()");
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("HTTP RESPONSE SURFACE THROW: H." + name + " "
+                                    + t.getClass().getName() + ": " + String.valueOf(t.getMessage()));
+                            return;
+                        }
+
+                        Object result = param.getResult();
+                        if (result instanceof byte[]) {
+                            byte[] data = (byte[]) result;
+                            int n = Math.min(data.length, 1200);
+                            String text;
+                            try {
+                                text = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+                            } catch (Throwable ignored) {
+                                text = "<binary>";
+                            }
+                            if (text.length() > 1200) text = text.substring(0, 1200);
+                            log("HTTP RESPONSE SURFACE RESULT: H." + name
+                                    + " bytes=" + data.length + " body=" + text);
+                        } else {
+                            String text = String.valueOf(result);
+                            if (text.length() > 2000) text = text.substring(0, 2000);
+                            log("HTTP RESPONSE SURFACE RESULT: H." + name
+                                    + " -> " + text);
+                        }
+                    }
+                });
+                found++;
+                log("hooked HTTP RESPONSE SURFACE: H." + name
+                        + "() -> " + method.getReturnType().getName());
+            }
+            log("HTTP RESPONSE SURFACE hooks installed: " + found);
+        } catch (Throwable e) {
+            log("HTTP RESPONSE SURFACE hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void hookYellowPageStreamRequest(ClassLoader cl) {
+        try {
+            Class<?> stream = Class.forName("com.miui.yellowpage.utils.s0", false, cl);
+            int found = 0;
+
+            for (Method method : stream.getDeclaredMethods()) {
+                final String name = method.getName();
+                Class<?>[] p = method.getParameterTypes();
+                if (!(("s".equals(name) && p.length == 1)
+                        || ("t".equals(name) && p.length == 2))) {
+                    continue;
+                }
+                if (p[0] != java.io.OutputStream.class
+                        || ("t".equals(name) && p[1] != java.util.Map.class)
+                        || method.getReturnType() != Integer.TYPE) {
+                    continue;
+                }
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("STREAM REQUEST ENTER: s0." + name
+                                + " args=" + formatHookArgs(param.args));
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("STREAM REQUEST THROW: s0." + name + " "
+                                    + t.getClass().getName() + ": " + String.valueOf(t.getMessage()));
+                            return;
+                        }
+
+                        Object out = param.args != null && param.args.length > 0
+                                ? param.args[0] : null;
+                        int code = param.getResult() instanceof Integer
+                                ? (Integer) param.getResult() : -1;
+
+                        if (out instanceof java.io.ByteArrayOutputStream) {
+                            try {
+                                byte[] data = ((java.io.ByteArrayOutputStream) out).toByteArray();
+                                String body = new String(
+                                        data, java.nio.charset.StandardCharsets.UTF_8);
+                                if (body.length() > 2000) body = body.substring(0, 2000);
+                                log("STREAM REQUEST RESULT: s0." + name
+                                        + " code=" + code
+                                        + " bytes=" + data.length
+                                        + " body=" + body);
+                            } catch (Throwable e) {
+                                log("STREAM REQUEST RESULT: s0." + name
+                                        + " code=" + code + " body-read-failed="
+                                        + e.getClass().getSimpleName());
+                            }
+                        } else {
+                            log("STREAM REQUEST RESULT: s0." + name
+                                    + " code=" + code
+                                    + " output=" + String.valueOf(out));
+                        }
+                    }
+                });
+                found++;
+                log("hooked STREAM REQUEST: s0." + name
+                        + "(" + p.length + " args)");
+            }
+
+            log("STREAM REQUEST hooks installed: " + found);
+        } catch (Throwable e) {
+            log("STREAM REQUEST hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookYellowPageResponseParser(ClassLoader cl) {
         try {
             Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
@@ -1620,6 +1753,8 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookPullTaskExecution(cl);
                             hookYellowPageHttpDecision(cl);
                             hookYellowPageResponseParser(cl);
+                            hookYellowPageResponseSurface(cl);
+                            hookYellowPageStreamRequest(cl);
                             hookYellowPageHttpBase(cl);
                             hookYellowPageLiveHttp(cl);
                             hookYellowPageDatabaseWrites(cl);
