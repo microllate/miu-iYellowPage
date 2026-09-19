@@ -86,7 +86,37 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
-private static void hookContactsGate(
+private static void hookYellowPagePullTask(ClassLoader cl) {
+        try {
+            Class<?> pullTask = Class.forName("Lo0.g", false, cl);
+            for (Method method : pullTask.getDeclaredMethods()) {
+                Class<?>[] p = method.getParameterTypes();
+                if (!"y".equals(method.getName())
+                        || method.getReturnType() != Boolean.TYPE
+                        || p.length != 1
+                        || p[0] != Context.class) {
+                    continue;
+                }
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("YellowPagePullTask.y() ENTER");
+                    }
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        log("YellowPagePullTask.y() RESULT=" + param.getResult());
+                    }
+                });
+                log("hooked Lo0.g.y(Context)");
+                return;
+            }
+            log("Lo0.g.y(Context) not found");
+        } catch (Throwable e) {
+            log("PullTask hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void hookContactsGate(
             ClassLoader cl, String methodName) {
         try {
             Class<?> proxy = Class.forName(
