@@ -162,6 +162,89 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookYellowPageJobServices(ClassLoader cl, Context context) {
+        try {
+            int found = 0;
+            java.util.ArrayList<String> paths = new java.util.ArrayList<>();
+            paths.add(context.getApplicationInfo().sourceDir);
+            String[] splits = context.getApplicationInfo().splitSourceDirs;
+            if (splits != null) {
+                for (String split : splits) {
+                    if (split != null && !paths.contains(split)) paths.add(split);
+                }
+            }
+
+            for (String apkPath : paths) {
+                DexFile dex = new DexFile(apkPath);
+                try {
+                    Enumeration<String> entries = dex.entries();
+                    while (entries.hasMoreElements()) {
+                        String name = entries.nextElement();
+                        if (name.indexOf('.') < 0 || !name.toLowerCase().contains("jobservice")) continue;
+                        try {
+                            Class<?> cls = Class.forName(name, false, cl);
+                            for (Method method : cls.getDeclaredMethods()) {
+                                String mn = method.getName();
+                                if (!"onStartJob".equals(mn) && !"onStopJob".equals(mn)) continue;
+                                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                                    @Override
+                                    protected void beforeHookedMethod(MethodHookParam param) {
+                                        log("JobService ENTER: " + cls.getName() + "." + method.getName());
+                                    }
+                                    @Override
+                                    protected void afterHookedMethod(MethodHookParam param) {
+                                        log("JobService RESULT: " + cls.getName() + "." + method.getName()
+                                                + "=" + param.getResult());
+                                    }
+                                });
+                                found++;
+                                log("hooked JobService: " + cls.getName() + "." + mn);
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                } finally {
+                    dex.close();
+                }
+            }
+            log("JobService hooks installed: " + found);
+        } catch (Throwable e) {
+            log("JobService scan failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private static void hookPullTaskExecution(ClassLoader cl) {
+        try {
+            Class<?> cls = Class.forName("o0.g", false, cl);
+            log("PullTask class found: " + cls.getName());
+            for (Method method : cls.getDeclaredMethods()) {
+                String mn = method.getName();
+                Class<?>[] p = method.getParameterTypes();
+                log("PullTask method: " + mn + "(" + p.length + " args) -> "
+                        + method.getReturnType().getSimpleName());
+
+                if (!"run".equals(mn) && !"execute".equals(mn) && !"pull".equals(mn)
+                        && !"y".equals(mn)) continue;
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("PullTask EXEC ENTER: o0.g." + method.getName());
+                    }
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        log("PullTask EXEC RESULT: o0.g." + method.getName()
+                                + "=" + String.valueOf(param.getResult()));
+                    }
+                });
+                log("hooked PullTask execution method: o0.g." + mn);
+            }
+        } catch (Throwable e) {
+            log("PullTask execution hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookContactsGate(
             ClassLoader cl, String methodName) {
         try {
