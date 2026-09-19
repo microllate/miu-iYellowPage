@@ -1503,7 +1503,138 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 + " resultClass="
                                 + (result == null ? "null" : result.getClass().getName()));
 
-                        if ("i".equals(name) && result == null) {
+                        /*
+                         * The last confirmed failure is x.j(...)->false.
+                         * x.i() delegates to x.j(), and o0.d.p() aborts when the
+                         * resulting boolean is false.  At this point the server has
+                         * already returned valid patch metadata and the CDN URL is
+                         * known, so reproduce the small file-copy operation here.
+                         *
+                         * x.j signature observed at runtime:
+                         *   (Context, String url, String file, Map, int) -> boolean
+                         *
+                         * Only touch the YellowPage spam CDN path.  This keeps the
+                         * hook from interfering with unrelated x.j() callers.
+                         */
+                        if ("j".equals(name)
+                                && Boolean.FALSE.equals(result)
+                                && param.args != null
+                                && param.args.length == 5
+                                && param.args[1] instanceof String
+                                && param.args[2] instanceof String) {
+                            String urlString = (String) param.args[1];
+                            String filePath = (String) param.args[2];
+
+                            if (urlString.contains("/yellowpage/yp-spam/")) {
+                                java.io.File outFile = new java.io.File(filePath);
+                                java.io.File parent = outFile.getParentFile();
+
+                                log("STREAM UTIL DIRECT DOWNLOAD: url=" + urlString
+                                        + " file=" + filePath);
+
+                                java.net.HttpURLConnection http = null;
+                                java.io.InputStream in = null;
+                                java.io.FileOutputStream out = null;
+
+                                try {
+                                    if (parent != null && !parent.exists() && !parent.mkdirs()
+                                            && !parent.exists()) {
+                                        throw new java.io.IOException(
+                                                "cannot create parent: " + parent);
+                                    }
+
+                                    java.net.URL url = new java.net.URL(urlString);
+                                    java.net.URLConnection connection = url.openConnection();
+                                    if (!(connection instanceof java.net.HttpURLConnection)) {
+                                        throw new java.io.IOException(
+                                                "not HttpURLConnection: "
+                                                        + connection.getClass().getName());
+                                    }
+
+                                    http = (java.net.HttpURLConnection) connection;
+                                    http.setConnectTimeout(15000);
+                                    http.setReadTimeout(30000);
+                                    http.setInstanceFollowRedirects(true);
+                                    http.setRequestMethod("GET");
+                                    http.setRequestProperty("Accept-Encoding", "identity");
+                                    http.setRequestProperty("User-Agent",
+                                            "MiuiYellowPage/1.0");
+
+                                    int code = http.getResponseCode();
+                                    long contentLength = http.getContentLengthLong();
+                                    log("STREAM UTIL DIRECT HTTP: code=" + code
+                                            + " length=" + contentLength
+                                            + " contentType=" + http.getContentType());
+
+                                    if (code < 200 || code >= 300) {
+                                        throw new java.io.IOException(
+                                                "HTTP " + code);
+                                    }
+
+                                    in = http.getInputStream();
+                                    if (in == null) {
+                                        throw new java.io.IOException("getInputStream()=null");
+                                    }
+
+                                    out = new java.io.FileOutputStream(outFile, false);
+                                    java.security.MessageDigest md =
+                                            java.security.MessageDigest.getInstance("MD5");
+
+                                    byte[] buffer = new byte[32768];
+                                    long total = 0;
+                                    int n;
+                                    while ((n = in.read(buffer)) != -1) {
+                                        if (n == 0) continue;
+                                        out.write(buffer, 0, n);
+                                        md.update(buffer, 0, n);
+                                        total += n;
+                                    }
+                                    out.flush();
+                                    out.close();
+                                    out = null;
+
+                                    StringBuilder md5 = new StringBuilder(32);
+                                    for (byte value : md.digest()) {
+                                        md5.append(String.format(java.util.Locale.US,
+                                                "%02x", value & 0xff));
+                                    }
+
+                                    log("STREAM UTIL DIRECT DOWNLOAD OK: bytes=" + total
+                                            + " md5=" + md5
+                                            + " fileLength=" + outFile.length());
+
+                                    if (total <= 0 || !outFile.isFile() || outFile.length() != total) {
+                                        throw new java.io.IOException(
+                                                "download size invalid: " + total);
+                                    }
+
+                                    param.setResult(Boolean.TRUE);
+                                    log("STREAM UTIL FORCE RESULT: x.j false -> true");
+                                } catch (Throwable e) {
+                                    try {
+                                        if (out != null) out.close();
+                                    } catch (Throwable ignored) {
+                                    }
+                                    try {
+                                        if (outFile.exists()) outFile.delete();
+                                    } catch (Throwable ignored) {
+                                    }
+                                    log("STREAM UTIL DIRECT DOWNLOAD FAILED: "
+                                            + e.getClass().getName() + ": "
+                                            + String.valueOf(e.getMessage()));
+                                } finally {
+                                    try {
+                                        if (in != null) in.close();
+                                    } catch (Throwable ignored) {
+                                    }
+                                    if (http != null) {
+                                        http.disconnect();
+                                    }
+                                }
+                            }
+                        }
+
+                        if ("i".equals(name) && param.getResult() == null) {
                             // x.i() is the final stream acquisition point used by
                             // o0.d.p -> s0.t. If the obfuscated helper returns null
                             // despite a live HTTP 200/content-length response, expose
