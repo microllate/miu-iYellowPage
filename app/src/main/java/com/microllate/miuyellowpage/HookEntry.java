@@ -1862,36 +1862,43 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 return false;
             }
 
-            if (target.exists() && !target.delete()) {
-                log("MOVE RECOVERY: cannot replace existing target=" + target);
+            if (target.exists() && target.isDirectory()) {
+                log("MOVE RECOVERY: target is directory=" + target);
                 return false;
             }
 
-            boolean renamed = source.renameTo(target);
-            if (!renamed) {
-                log("MOVE RECOVERY: renameTo failed, copying instead");
-                java.io.InputStream in = null;
-                java.io.OutputStream out = null;
-                try {
-                    in = new java.io.FileInputStream(source);
-                    out = new java.io.FileOutputStream(target, false);
-                    byte[] buffer = new byte[32768];
-                    int n;
-                    while ((n = in.read(buffer)) != -1) {
-                        if (n > 0) out.write(buffer, 0, n);
-                    }
-                    out.flush();
-                } finally {
-                    try { if (in != null) in.close(); } catch (Throwable ignored) {}
-                    try { if (out != null) out.close(); } catch (Throwable ignored) {}
+            // Do not require unlinking the old target first. Android/Linux can
+            // reject delete/rename while another YellowPage reader still holds
+            // the old file. Opening the existing regular file with truncate=true
+            // is enough to replace its contents for this same-app data path.
+            boolean copied = false;
+            java.io.InputStream in = null;
+            java.io.OutputStream out = null;
+            try {
+                in = new java.io.FileInputStream(source);
+                out = new java.io.FileOutputStream(target, false);
+                byte[] buffer = new byte[32768];
+                int n;
+                while ((n = in.read(buffer)) != -1) {
+                    if (n > 0) out.write(buffer, 0, n);
                 }
-                if (!target.isFile() || target.length() <= 0) {
-                    log("MOVE RECOVERY: copy failed");
-                    return false;
-                }
-                if (!source.delete()) {
-                    log("MOVE RECOVERY: copied but source delete failed");
-                }
+                out.flush();
+                copied = target.isFile() && target.length() > 0;
+            } finally {
+                try { if (in != null) in.close(); } catch (Throwable ignored) {}
+                try { if (out != null) out.close(); } catch (Throwable ignored) {}
+            }
+
+            if (!copied) {
+                log("MOVE RECOVERY: copy failed target=" + target
+                        + " exists=" + target.exists()
+                        + " isFile=" + target.isFile()
+                        + " length=" + target.length());
+                return false;
+            }
+
+            if (!source.delete()) {
+                log("MOVE RECOVERY: copied but source delete failed");
             }
 
             log("MOVE RECOVERY OK: " + source + " -> " + target
