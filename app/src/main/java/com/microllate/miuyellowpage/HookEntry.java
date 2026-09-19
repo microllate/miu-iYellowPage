@@ -1618,6 +1618,106 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         log("CRITICAL GATES INSTALL END");
     }
 
+    private static void hookYellowPageDataDecode(ClassLoader cl) {
+        try {
+            // Trace every method in the post-response pipeline that receives the
+            // server payload. We intentionally do not alter the returned data yet.
+            String[] classes = new String[] {
+                    "o0.g",
+                    "o0.AbstractC0381d",
+                    "o0.d",
+                    "n0.d",
+                    "com.miui.yellowpage.utils.H",
+                    "com.miui.yellowpage.utils.j0"
+            };
+            int hooked = 0;
+            for (String className : classes) {
+                try {
+                    Class<?> cls = Class.forName(className, false, cl);
+                    for (Method method : cls.getDeclaredMethods()) {
+                        Class<?>[] p = method.getParameterTypes();
+                        boolean payloadArg = false;
+                        for (Class<?> type : p) {
+                            if (type == String.class || type == java.io.InputStream.class
+                                    || type == org.json.JSONObject.class
+                                    || type == byte[].class) {
+                                payloadArg = true;
+                                break;
+                            }
+                        }
+                        if (!payloadArg) continue;
+
+                        final Method target = method;
+                        XposedBridge.hookMethod(target, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                try {
+                                    StringBuilder sb = new StringBuilder();
+                                    sb.append("DATA PIPE ENTER: ")
+                                            .append(target.getDeclaringClass().getName())
+                                            .append(".").append(target.getName())
+                                            .append(" args=");
+                                    if (param.args != null) {
+                                        for (int i = 0; i < param.args.length; i++) {
+                                            Object a = param.args[i];
+                                            if (i > 0) sb.append(" | ");
+                                            if (a == null) {
+                                                sb.append("null");
+                                            } else if (a instanceof String) {
+                                                String s = (String) a;
+                                                if (s.length() > 600) s = s.substring(0, 600);
+                                                sb.append("String[").append(s).append("]");
+                                            } else if (a instanceof byte[]) {
+                                                sb.append("byte[").append(((byte[]) a).length).append("]");
+                                            } else {
+                                                sb.append(a.getClass().getName()).append(":")
+                                                        .append(String.valueOf(a).substring(0,
+                                                                Math.min(300, String.valueOf(a).length())));
+                                            }
+                                        }
+                                    }
+                                    log(sb.toString());
+                                } catch (Throwable e) {
+                                    log("DATA PIPE ENTER log failed: " + e.getClass().getSimpleName());
+                                }
+                            }
+
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                try {
+                                    if (param.hasThrowable()) {
+                                        log("DATA PIPE THROW: " + target.getDeclaringClass().getName()
+                                                + "." + target.getName() + " "
+                                                + param.getThrowable().getClass().getName() + ": "
+                                                + String.valueOf(param.getThrowable().getMessage()));
+                                        return;
+                                    }
+                                    Object r = param.getResult();
+                                    String s = String.valueOf(r);
+                                    if (s.length() > 1000) s = s.substring(0, 1000);
+                                    log("DATA PIPE RESULT: " + target.getDeclaringClass().getName()
+                                            + "." + target.getName() + " -> " + s);
+                                } catch (Throwable e) {
+                                    log("DATA PIPE RESULT log failed: " + e.getClass().getSimpleName());
+                                }
+                            }
+                        });
+                        hooked++;
+                        log("hooked DATA PIPE: " + target.getDeclaringClass().getName()
+                                + "." + target.getName());
+                    }
+                } catch (Throwable e) {
+                    log("DATA PIPE class scan failed " + className + ": "
+                            + e.getClass().getSimpleName());
+                }
+            }
+            log("DATA PIPE hooks installed=" + hooked);
+        } catch (Throwable e) {
+            log("DATA PIPE hook failed: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookYellowPageRegionParam(ClassLoader cl) {
         try {
             Class<?> k0 = Class.forName("com.miui.yellowpage.utils.k0", false, cl);
@@ -2761,6 +2861,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             hookYellowPageWStatus(cl);
             hookYellowPageActualRequestBuilder(cl);
             hookYellowPageRegionParam(cl);
+            hookYellowPageDataDecode(cl);
             hookGlobalHttpsConnection(cl);
             try {
                 log("CRITICAL CALL BEFORE");
