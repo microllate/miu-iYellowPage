@@ -570,6 +570,70 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookYellowPageHttpBase(ClassLoader cl) {
+        try {
+            Class<?> base = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+            int found = 0;
+            for (Method method : base.getDeclaredMethods()) {
+                final String methodName = method.getName();
+                final int argCount = method.getParameterTypes().length;
+
+                if (!("d".equals(methodName) || "e".equals(methodName)
+                        || "f".equals(methodName) || "g".equals(methodName)
+                        || "h".equals(methodName) || "b".equals(methodName)
+                        || "c".equals(methodName))) {
+                    continue;
+                }
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        log("HTTP BASE ENTER: j0." + methodName
+                                + " args=" + formatHookArgs(param.args));
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("HTTP BASE THROW: j0." + methodName
+                                    + " " + t.getClass().getName()
+                                    + ": " + String.valueOf(t.getMessage()));
+                            return;
+                        }
+
+                        Object result = param.getResult();
+                        String text = String.valueOf(result);
+                        if (text.length() > 1000) {
+                            text = text.substring(0, 1000);
+                        }
+                        log("HTTP BASE RESULT: j0." + methodName
+                                + " -> " + text
+                                + " class=" + (result == null
+                                ? "null" : result.getClass().getName()));
+
+                        if (result instanceof java.net.HttpURLConnection) {
+                            try {
+                                java.net.HttpURLConnection conn =
+                                        (java.net.HttpURLConnection) result;
+                                log("HTTP BASE CONNECTION: url="
+                                        + String.valueOf(conn.getURL()));
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                });
+                found++;
+                log("hooked HTTP BASE: j0." + methodName
+                        + "(" + argCount + " args)");
+            }
+            log("HTTP BASE hooks installed: " + found);
+        } catch (Throwable e) {
+            log("HTTP BASE hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookMeteredNetworkGuard(ClassLoader cl) {
         try {
             Class<?> cm = Class.forName("android.net.ConnectivityManager", false, cl);
@@ -1020,6 +1084,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
                             hookYellowPageHttpDecision(cl);
+                            hookYellowPageHttpBase(cl);
                             hookYellowPageDatabaseWrites(cl);
                             hookPullTaskPipeline(cl, context);
                             hookMeteredNetworkGuard(cl);
