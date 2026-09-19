@@ -1313,16 +1313,17 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     }
 
     private static void hookYellowPageNetworkGates(ClassLoader cl) {
+        // H.u() has a concrete gate sequence in the EEA APK:
+        //   j0.k -> Permission.networkingAllowed(j0.i) -> X.k(j0.i) -> j0.d()
+        // Hook the exact classes/methods and also dump the H/j0 state at H.u entry.
         try {
             Class<?> permission = Class.forName("miui.yellowpage.Permission", false, cl);
-            for (Method method : permission.getDeclaredMethods()) {
-                if (!"networkingAllowed".equals(method.getName())
-                        || method.getParameterTypes().length != 1
-                        || method.getParameterTypes()[0] != Context.class
-                        || method.getReturnType() != Boolean.TYPE
-                        || !Modifier.isStatic(method.getModifiers())) {
-                    continue;
-                }
+            Method method = permission.getDeclaredMethod(
+                    "networkingAllowed", Context.class);
+            if (!Modifier.isStatic(method.getModifiers())
+                    || method.getReturnType() != Boolean.TYPE) {
+                log("NETWORK GATE Permission.networkingAllowed signature mismatch");
+            } else {
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
@@ -1333,32 +1334,81 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 log("hooked NETWORK GATE: Permission.networkingAllowed(Context)");
             }
         } catch (Throwable e) {
-            log("NETWORK GATE Permission hook failed: " + e.getClass().getSimpleName());
+            log("NETWORK GATE Permission hook failed: "
+                    + e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
         }
 
         try {
-            Class<?> q = Class.forName("Q", false, cl);
-            int found = 0;
-            for (Method method : q.getDeclaredMethods()) {
-                if (!"a".equals(method.getName())
-                        || method.getParameterTypes().length != 1
-                        || method.getParameterTypes()[0] != Context.class
-                        || method.getReturnType() != Boolean.TYPE
-                        || !Modifier.isStatic(method.getModifiers())) {
-                    continue;
-                }
+            Class<?> x = Class.forName("com.miui.yellowpage.utils.X", false, cl);
+            Method method = x.getDeclaredMethod("k", Context.class);
+            if (!Modifier.isStatic(method.getModifiers())
+                    || method.getReturnType() != Boolean.TYPE) {
+                log("NETWORK GATE X.k signature mismatch");
+            } else {
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
-                        log("NETWORK GATE: Q.a(Context) -> "
+                        log("NETWORK GATE: X.k(Context) -> "
                                 + String.valueOf(param.getResult()));
                     }
                 });
-                found++;
+                log("hooked NETWORK GATE: X.k(Context)");
             }
-            log("hooked NETWORK GATE: Q.a(Context) count=" + found);
         } catch (Throwable e) {
-            log("NETWORK GATE Q hook failed: " + e.getClass().getSimpleName());
+            log("NETWORK GATE X.k hook failed: "
+                    + e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
+        }
+
+        try {
+            Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
+            Method u = http.getDeclaredMethod("u");
+            XposedBridge.hookMethod(u, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    Object obj = param.thisObject;
+                    StringBuilder state = new StringBuilder("H.u STATE:");
+                    Class<?> current = obj == null ? null : obj.getClass();
+                    try {
+                        Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+                        java.lang.reflect.Field k = j0.getDeclaredField("k");
+                        k.setAccessible(true);
+                        state.append(" k=").append(String.valueOf(k.get(obj)));
+                    } catch (Throwable e) {
+                        state.append(" k=?");
+                    }
+                    try {
+                        Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+                        java.lang.reflect.Field i = j0.getDeclaredField("i");
+                        i.setAccessible(true);
+                        Object ctx = i.get(obj);
+                        state.append(" context=").append(
+                                ctx == null ? "null" : ctx.getClass().getName());
+                    } catch (Throwable e) {
+                        state.append(" context=?");
+                    }
+                    try {
+                        Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+                        java.lang.reflect.Field j = j0.getDeclaredField("j");
+                        j.setAccessible(true);
+                        state.append(" method=").append(String.valueOf(j.get(obj)));
+                    } catch (Throwable e) {
+                        state.append(" method=?");
+                    }
+                    try {
+                        Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+                        java.lang.reflect.Field cField = j0.getDeclaredField("c");
+                        cField.setAccessible(true);
+                        state.append(" url=").append(String.valueOf(cField.get(obj)));
+                    } catch (Throwable e) {
+                        state.append(" url=?");
+                    }
+                    log(state.toString());
+                }
+            });
+            log("hooked H.u state probe");
+        } catch (Throwable e) {
+            log("H.u state probe hook failed: "
+                    + e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
         }
     }
 
