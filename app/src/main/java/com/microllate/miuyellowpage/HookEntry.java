@@ -438,6 +438,8 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                     param.thisObject, "getContext");
                             log("YellowPageProvider.onCreate");
                             hookYellowPagePullTask(cl, context);
+                            hookYellowPageJobServices(cl, context);
+                            hookPullTaskExecution(cl);
                             importYellowPageData(cl, context, dbHelperClass);
                         } catch (Throwable e) {
                             log("provider onCreate hook failed: "
