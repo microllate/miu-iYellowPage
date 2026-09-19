@@ -639,11 +639,15 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 log("J0.D LIVE RESULT: "
                                         + (result == null ? "null" : result.getClass().getName()));
                                 if (result instanceof java.net.HttpURLConnection) {
+                                    java.net.HttpURLConnection connection =
+                                            (java.net.HttpURLConnection) result;
                                     try {
-                                        log("J0.D LIVE URL: "
-                                                + ((java.net.HttpURLConnection) result).getURL());
+                                        log("J0.D LIVE URL: " + connection.getURL());
                                     } catch (Throwable ignored) {
                                     }
+                                    // Install hooks on the exact concrete connection
+                                    // object/class returned by the real j0.d() call.
+                                    hookHConnectionResponse(connection);
                                 }
                             }
                         });
