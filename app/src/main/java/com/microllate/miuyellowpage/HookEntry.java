@@ -2167,46 +2167,64 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
-    private static void hookYellowPageMoveHelper(ClassLoader cl) {
+    private static void hookYellowPageCopyHelper(ClassLoader cl) {
         try {
-            Class<?> utility = Class.forName("com.miui.yellowpage.utils.x", false, cl);
-            Method move = utility.getDeclaredMethod(
-                    "b", java.io.File.class, java.io.File.class);
-            XposedBridge.hookMethod(move, new XC_MethodHook() {
+            Class<?> helper = Class.forName("e1.C0282c", false, cl);
+            Method copy = helper.getDeclaredMethod(
+                    "b", java.io.InputStream.class, java.io.File.class);
+            XposedBridge.hookMethod(copy, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
-                    if (!(param.args[0] instanceof java.io.File)
+                    if (param.args == null || param.args.length != 2
                             || !(param.args[1] instanceof java.io.File)) {
                         return;
                     }
-                    java.io.File source = (java.io.File) param.args[0];
                     java.io.File target = (java.io.File) param.args[1];
-                    String sourcePath = source.getAbsolutePath();
-                    String targetPath = target.getAbsolutePath();
-                    if (!sourcePath.contains("yellow_pages.dat")
-                            || !targetPath.contains("yellow_pages.dat")) {
+                    String path = target.getAbsolutePath();
+                    if (!path.endsWith("yellow_pages.dat")
+                            || !path.contains("com.miui.yellowpage")) {
                         return;
                     }
 
-                    // x.b() is not a rename: it deletes/creates the target and
-                    // copies the source through Le1.c. On this ROM that copy path
-                    // returns false although a native rename succeeds. Use the
-                    // exact same-process rename as the successful primitive.
+                    // Original e1.C0282c.b() deletes the target first. On this
+                    // ROM that unlink/delete operation fails with EACCES, even
+                    // though the existing target inode is writable. Keep the
+                    // same copy operation, but overwrite the existing inode in
+                    // place so no unlink/delete permission is required.
+                    java.io.InputStream in = (java.io.InputStream) param.args[0];
+                    java.io.FileOutputStream out = null;
                     try {
-                        android.system.Os.rename(sourcePath, targetPath);
+                        out = new java.io.FileOutputStream(target, false);
+                        byte[] buffer = new byte[4096];
+                        int read;
+                        long total = 0;
+                        while ((read = in.read(buffer)) >= 0) {
+                            if (read == 0) continue;
+                            out.write(buffer, 0, read);
+                            total += read;
+                        }
+                        out.flush();
+                        try {
+                            out.getFD().sync();
+                        } catch (java.io.IOException ignored) {
+                        }
                         param.setResult(true);
-                        log("XELLOWPAGE_MOVE_BYPASS: Os.rename SUCCESS "
-                                + sourcePath + " -> " + targetPath);
+                        log("YELLOWPAGE COPY BYPASS: overwrite target="
+                                + path + " bytes=" + total);
                     } catch (Throwable e) {
-                        log("XELLOWPAGE_MOVE_BYPASS: rename failed "
+                        log("YELLOWPAGE COPY BYPASS FAILED: "
                                 + e.getClass().getSimpleName() + ":"
                                 + String.valueOf(e.getMessage()));
+                    } finally {
+                        if (out != null) {
+                            try { out.close(); } catch (Throwable ignored) { }
+                        }
                     }
                 }
             });
-            log("XELLOWPAGE_MOVE_BYPASS hooked com.miui.yellowpage.utils.x.b(File,File)");
+            log("YELLOWPAGE COPY BYPASS hooked e1.C0282c.b(InputStream,File)");
         } catch (Throwable e) {
-            log("XELLOWPAGE_MOVE_BYPASS hook failed: "
+            log("YELLOWPAGE COPY BYPASS hook failed: "
                     + e.getClass().getSimpleName() + ":"
                     + String.valueOf(e.getMessage()));
         }
@@ -2249,7 +2267,7 @@ public class HookEntry implements IXposedHookLoadPackage {
             // yellow_pages.dat. Keep the downloaded .tmp file and transparently
             // redirect YellowPage readers to it instead of requiring a filesystem move.
             hookYellowPageDataFileReads(cl);
-            hookYellowPageMoveHelper(cl);
+            hookYellowPageCopyHelper(cl);
 
             // One-shot diagnosis of the real filesystem failure. Do not recover or suppress it.
             try {
