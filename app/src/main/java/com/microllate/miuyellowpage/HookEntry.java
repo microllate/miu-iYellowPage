@@ -411,6 +411,7 @@ private static void hookContactsGate(
                     cl, "miui.yellowpage.YellowPageUtils",
                     "isYellowPageEnable");
             hookYellowPageSyncGate(cl);
+            hookYellowPagePullTask(cl);
 
             Class<?> dbHelperClass = Class.forName(
                     "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
