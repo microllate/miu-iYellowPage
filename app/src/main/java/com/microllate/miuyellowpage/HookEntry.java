@@ -1831,6 +1831,62 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+    private static String shellQuote(String value) {
+        if (value == null) return "''";
+        return "'" + value.replace("'", "'\\''") + "'";
+    }
+
+    private static String runRootCommand(String command) {
+        Process process = null;
+        java.io.InputStream in = null;
+        java.io.InputStream err = null;
+        java.io.ByteArrayOutputStream outBytes = new java.io.ByteArrayOutputStream();
+        java.io.ByteArrayOutputStream errBytes = new java.io.ByteArrayOutputStream();
+        try {
+            process = Runtime.getRuntime().exec(new String[]{"su", "-c", command});
+            in = process.getInputStream();
+            err = process.getErrorStream();
+
+            byte[] buffer = new byte[4096];
+            int n;
+            while ((n = in.read(buffer)) != -1) {
+                outBytes.write(buffer, 0, n);
+            }
+            while ((n = err.read(buffer)) != -1) {
+                errBytes.write(buffer, 0, n);
+            }
+
+            int exit = process.waitFor();
+            String stdout = outBytes.toString("UTF-8").trim();
+            String stderr = errBytes.toString("UTF-8").trim();
+
+            log("ROOT CMD exit=" + exit
+                    + " stdout=" + (stdout.length() > 300 ? stdout.substring(0, 300) : stdout)
+                    + " stderr=" + (stderr.length() > 300 ? stderr.substring(0, 300) : stderr));
+
+            return exit == 0 ? stdout : null;
+        } catch (Throwable e) {
+            log("ROOT CMD FAILED: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+            return null;
+        } finally {
+            try {
+                if (in != null) in.close();
+            } catch (Throwable ignored) {
+            }
+            try {
+                if (err != null) err.close();
+            } catch (Throwable ignored) {
+            }
+            if (process != null) {
+                try {
+                    process.destroy();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
     private static boolean recoverYellowPageMove(Object[] args) {
         try {
             java.io.File source = null;
@@ -1850,26 +1906,20 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             }
 
             if (source == null) {
-                java.io.File fallback = new java.io.File(
+                source = new java.io.File(
                         "/data/user/0/com.miui.yellowpage/files/.yellow_pages.dat.tmp");
-                if (fallback.isFile()) source = fallback;
             }
             if (target == null) {
                 target = new java.io.File(
                         "/data/user/0/com.miui.yellowpage/files/yellowpage/yellow_pages.dat");
             }
 
-            if (source == null || !source.isFile()) {
-                log("MOVE RECOVERY: source missing");
+            if (!source.isFile()) {
+                log("MOVE RECOVERY: source missing: " + source);
                 return false;
             }
 
             java.io.File parent = target.getParentFile();
-            if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.exists()) {
-                log("MOVE RECOVERY: cannot create target parent=" + parent);
-                return false;
-            }
-
             log("MOVE RECOVERY TARGET: path=" + safeCanonicalPath(target)
                     + " exists=" + target.exists()
                     + " file=" + target.isFile()
@@ -1888,50 +1938,54 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 return false;
             }
 
-            // First try a normal rename when the destination does not exist.
+            // First keep the normal in-process path for devices where the target
+            // is writable. This avoids invoking su unnecessarily.
             if (!target.exists() && source.renameTo(target)) {
                 log("MOVE RECOVERY OK: renameTo, bytes=" + target.length());
                 return target.isFile() && target.length() > 0;
             }
 
-            // Otherwise copy the verified tmp file into the existing destination.
-            // This is the best effort available from the YellowPage process itself;
-            // an EACCES result is logged explicitly rather than being hidden.
-            java.io.InputStream in = null;
-            java.io.OutputStream out = null;
-            try {
-                in = new java.io.FileInputStream(source);
-                out = new java.io.FileOutputStream(target, false);
-
-                byte[] buffer = new byte[32768];
-                int n;
-                while ((n = in.read(buffer)) != -1) {
-                    if (n > 0) out.write(buffer, 0, n);
-                }
-                out.flush();
-            } finally {
-                try {
-                    if (in != null) in.close();
-                } catch (Throwable ignored) {
-                }
-                try {
-                    if (out != null) out.close();
-                } catch (Throwable ignored) {
-                }
-            }
-
-            if (!target.isFile() || target.length() <= 0) {
-                log("MOVE RECOVERY: copy produced invalid target length=" + target.length());
+            // The EEA build can leave an existing target that the YellowPage UID
+            // can read but cannot replace. Probe the actual root channel and, when
+            // available, perform the final replacement outside the app sandbox.
+            String rootId = runRootCommand("id");
+            if (rootId == null || !rootId.contains("uid=0")) {
+                log("MOVE RECOVERY: root unavailable");
                 return false;
             }
 
-            if (!source.delete()) {
-                log("MOVE RECOVERY: copied but tmp delete failed");
+            log("MOVE RECOVERY: root available; replacing target");
+
+            String sourcePath = source.getAbsolutePath();
+            String targetPath = target.getAbsolutePath();
+
+            String replaceCommand = "rm -f " + shellQuote(targetPath)
+                    + " && mv -f " + shellQuote(sourcePath)
+                    + " " + shellQuote(targetPath);
+
+            String replaceResult = runRootCommand(replaceCommand);
+            if (replaceResult == null && target.isFile() && target.length() > 0) {
+                // Some su implementations produce no stdout on success; verify
+                // the actual filesystem result rather than relying only on output.
+                log("MOVE RECOVERY: root command returned failure");
+                return false;
             }
 
-            log("MOVE RECOVERY OK: " + source + " -> " + target
-                    + " bytes=" + target.length());
-            return true;
+            // Restore the device's expected SELinux label if restorecon is present.
+            // Failure here is non-fatal; the actual replacement is already complete.
+            runRootCommand("restorecon " + shellQuote(targetPath));
+
+            boolean valid = target.isFile() && target.length() > 0 && !source.exists();
+            log("MOVE RECOVERY ROOT RESULT: valid=" + valid
+                    + " targetLength=" + target.length()
+                    + " sourceExists=" + source.exists());
+
+            if (valid) {
+                return true;
+            }
+
+            log("MOVE RECOVERY: root replacement did not produce valid target");
+            return false;
         } catch (Throwable e) {
             log("MOVE RECOVERY FAILED: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
