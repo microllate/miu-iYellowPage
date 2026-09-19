@@ -2183,7 +2183,20 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
         try {
             ClassLoader cl = lpparam.classLoader;
-            hookCriticalYellowPageGates(cl);
+            log("YELLOWPAGE LOAD ENTER classLoader=" + String.valueOf(cl));
+            try {
+                log("CRITICAL CALL BEFORE");
+                hookCriticalYellowPageGates(cl);
+                log("CRITICAL CALL AFTER");
+            } catch (Throwable e) {
+                log("CRITICAL CALL THROW: " + e.getClass().getName()
+                        + ": " + String.valueOf(e.getMessage()));
+                Throwable cause = e.getCause();
+                if (cause != null) {
+                    log("CRITICAL CALL CAUSE: " + cause.getClass().getName()
+                            + ": " + String.valueOf(cause.getMessage()));
+                }
+            }
 
             hookBooleanContextMethod(
                     cl, "miui.yellowpage.YellowPageUtils",
