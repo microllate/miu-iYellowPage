@@ -828,8 +828,8 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 }
                             }
                             if (target) {
-                                log("HTTP decision z: " + url + " original=" + original + " -> true");
-                                param.setResult(true);
+                                log("HTTP decision z: " + url + " original=" + original
+                                        + " -> KEEP ORIGINAL");
                             } else {
                                 log("HTTP decision z: " + url + " original=" + original);
                             }
