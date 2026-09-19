@@ -503,6 +503,53 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     private static void hookYellowPageHttpDecision(ClassLoader cl) {
         try {
             Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
+            // H extends the actual j0 networking class. Hook the concrete
+            // superclass resolved from H itself, rather than relying only on
+            // Class.forName("com.miui.yellowpage.utils.j0", cl). This makes the
+            // diagnostic hook follow the exact class used by H.u().
+            Class<?> networkBase = http.getSuperclass();
+            int networkDepth = 0;
+            while (networkBase != null && networkBase != Object.class && networkDepth < 6) {
+                for (Method method : networkBase.getDeclaredMethods()) {
+                    if ("d".equals(method.getName())
+                            && method.getParameterTypes().length == 0
+                            && java.net.HttpURLConnection.class.isAssignableFrom(method.getReturnType())) {
+                        final Method dMethod = method;
+                        final Class<?> declaring = networkBase;
+                        XposedBridge.hookMethod(dMethod, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) {
+                                log("J0.D DIRECT ENTER: " + declaring.getName()
+                                        + " return=" + dMethod.getReturnType().getName());
+                            }
+
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) {
+                                if (param.hasThrowable()) {
+                                    Throwable t = param.getThrowable();
+                                    log("J0.D DIRECT THROW: " + t.getClass().getName()
+                                            + ": " + String.valueOf(t.getMessage()));
+                                    return;
+                                }
+                                Object result = param.getResult();
+                                log("J0.D DIRECT RESULT: "
+                                        + (result == null ? "null" : result.getClass().getName()));
+                                if (result instanceof java.net.HttpURLConnection) {
+                                    try {
+                                        log("J0.D DIRECT URL: "
+                                                + String.valueOf(((java.net.HttpURLConnection) result).getURL()));
+                                    } catch (Throwable ignored) {
+                                    }
+                                }
+                            }
+                        });
+                        log("hooked DIRECT J0.d(): " + declaring.getName());
+                    }
+                }
+                networkBase = networkBase.getSuperclass();
+                networkDepth++;
+            }
+
             final String[] targets = new String[] {
                     "https://api.comm.miui.com/cspmisc/patch/info",
                     "https://global.api.huangye.miui.com/spbook/yellowpage/provider/info"
