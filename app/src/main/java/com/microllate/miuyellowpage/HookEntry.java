@@ -424,6 +424,75 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     }
 
 
+    private static void hookHConnectionResponse(java.net.HttpURLConnection connection) {
+        try {
+            if (connection == null) {
+                return;
+            }
+
+            final String url;
+            try {
+                url = String.valueOf(connection.getURL());
+            } catch (Throwable ignored) {
+                return;
+            }
+
+            log("HTTP RESPONSE HOOK: " + url);
+
+            try {
+                int code = connection.getResponseCode();
+                log("HTTP RESPONSE CODE: " + code + " url=" + url);
+            } catch (Throwable e) {
+                log("HTTP RESPONSE CODE THROW: " + e.getClass().getName()
+                        + ": " + String.valueOf(e.getMessage()));
+            }
+
+            try {
+                java.io.InputStream stream;
+                try {
+                    stream = connection.getInputStream();
+                } catch (Throwable inputError) {
+                    log("HTTP INPUTSTREAM THROW: " + inputError.getClass().getName()
+                            + ": " + String.valueOf(inputError.getMessage()));
+                    stream = connection.getErrorStream();
+                }
+
+                if (stream == null) {
+                    log("HTTP RESPONSE BODY: <null stream>");
+                    return;
+                }
+
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                byte[] buffer = new byte[4096];
+                int total = 0;
+                int read;
+
+                while (total < 16384
+                        && (read = stream.read(buffer, 0,
+                        Math.min(buffer.length, 16384 - total))) != -1) {
+                    out.write(buffer, 0, read);
+                    total += read;
+                }
+
+                stream.close();
+
+                String body = new String(out.toByteArray(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                log("HTTP RESPONSE BODY length=" + body.length());
+                if (body.length() > 8000) {
+                    body = body.substring(0, 8000);
+                }
+                log("HTTP RESPONSE BODY DATA: " + body);
+            } catch (Throwable e) {
+                log("HTTP RESPONSE BODY THROW: " + e.getClass().getName()
+                        + ": " + String.valueOf(e.getMessage()));
+            }
+        } catch (Throwable e) {
+            log("HTTP RESPONSE HOOK THROW: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void probeHNetworkCall(Object hObject) {
         try {
             if (hObject == null) {
@@ -472,6 +541,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     log("H NETWORK PROBE URL: " + connection.getURL());
                 } catch (Throwable ignored) {
                 }
+                hookHConnectionResponse(connection);
             }
         } catch (Throwable e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
@@ -479,6 +549,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     + ": " + String.valueOf(cause.getMessage()));
         }
     }
+
 
     private static void hookReturnedPullObject(Object target) {
         try {
