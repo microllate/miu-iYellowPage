@@ -2057,6 +2057,116 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+
+    private static boolean moveDiagDone = false;
+
+    private static void diagnoseYellowPageMove(Object[] args) {
+        if (moveDiagDone) return;
+        moveDiagDone = true;
+
+        try {
+            java.util.ArrayList<String> paths = new java.util.ArrayList<>();
+            if (args != null) {
+                for (Object arg : args) {
+                    if (arg instanceof java.io.File) {
+                        paths.add(((java.io.File) arg).getAbsolutePath());
+                    } else if (arg instanceof String) {
+                        String value = (String) arg;
+                        if (value.contains("yellow_pages.dat")) {
+                            paths.add(value);
+                        }
+                    }
+                }
+            }
+
+            java.io.File source = null;
+            java.io.File target = null;
+            for (String path : paths) {
+                if (path.endsWith(".yellow_pages.dat.tmp")) {
+                    source = new java.io.File(path);
+                } else if (path.endsWith("yellow_pages.dat")) {
+                    target = new java.io.File(path);
+                }
+            }
+
+            if (source == null || target == null) {
+                for (String base : new String[] {
+                        "/data/user/0/com.miui.yellowpage/files",
+                        "/data/user/0/com.miui.yellowpage/files/yellowpage"
+                }) {
+                    java.io.File s = new java.io.File(base, ".yellow_pages.dat.tmp");
+                    java.io.File t = new java.io.File(base, "yellow_pages.dat");
+                    if (s.exists() || t.exists()) {
+                        source = s;
+                        target = t;
+                        break;
+                    }
+                }
+            }
+
+            log("MOVE DIAG: source=" + String.valueOf(source)
+                    + " target=" + String.valueOf(target));
+
+            if (source == null || target == null) return;
+
+            java.io.File parent = source.getParentFile();
+            log("MOVE DIAG: src exists=" + source.exists()
+                    + " len=" + source.length()
+                    + " read=" + source.canRead()
+                    + " write=" + source.canWrite());
+            log("MOVE DIAG: dst exists=" + target.exists()
+                    + " len=" + target.length()
+                    + " read=" + target.canRead()
+                    + " write=" + target.canWrite());
+            log("MOVE DIAG: parent=" + String.valueOf(parent)
+                    + " exists=" + (parent != null && parent.exists())
+                    + " write=" + (parent != null && parent.canWrite()));
+
+            try {
+                android.system.StructStat st = android.system.Os.stat(source.getAbsolutePath());
+                log("MOVE DIAG: src stat uid=" + st.st_uid
+                        + " gid=" + st.st_gid
+                        + " mode=0" + Integer.toOctalString(st.st_mode)
+                        + " size=" + st.st_size);
+            } catch (Throwable e) {
+                log("MOVE DIAG: src stat failed="
+                        + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage()));
+            }
+
+            try {
+                android.system.StructStat st = android.system.Os.stat(target.getAbsolutePath());
+                log("MOVE DIAG: dst stat uid=" + st.st_uid
+                        + " gid=" + st.st_gid
+                        + " mode=0" + Integer.toOctalString(st.st_mode)
+                        + " size=" + st.st_size);
+            } catch (Throwable e) {
+                log("MOVE DIAG: dst stat failed="
+                        + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage()));
+            }
+
+            // Re-run the exact native rename once, from the YellowPage app process.
+            // This is intentionally one-shot and does not alter the sync state machine.
+            if (source.exists()) {
+                try {
+                    android.system.Os.rename(
+                            source.getAbsolutePath(),
+                            target.getAbsolutePath());
+                    log("MOVE DIAG: Os.rename SUCCESS");
+                } catch (android.system.ErrnoException e) {
+                    log("MOVE DIAG: Os.rename FAILED errno=" + e.errno
+                            + " message=" + String.valueOf(e.getMessage()));
+                } catch (Throwable e) {
+                    log("MOVE DIAG: Os.rename FAILED "
+                            + e.getClass().getSimpleName() + ":"
+                            + String.valueOf(e.getMessage()));
+                }
+            }
+        } catch (Throwable e) {
+            log("MOVE DIAG failed: " + e.getClass().getSimpleName()
+                    + ":" + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookYellowPageDownload(ClassLoader cl) {
         try {
             Class<?> d = Class.forName("o0.d", false, cl);
@@ -2095,43 +2205,26 @@ public class HookEntry implements IXposedHookLoadPackage {
             // redirect YellowPage readers to it instead of requiring a filesystem move.
             hookYellowPageDataFileReads(cl);
 
-            // The CDN file is now downloaded successfully, but o0.d.q() fails
-            // while moving .yellow_pages.dat.tmp to the final yellow_pages.dat.
-            // Recover that exact filesystem transition and suppress only the
-            // known "failed to move" exception.
+            // One-shot diagnosis of the real filesystem failure. Do not recover or suppress it.
             try {
                 for (Method method : d.getDeclaredMethods()) {
                     if (!"q".equals(method.getName())) continue;
                     XposedBridge.hookMethod(method, new XC_MethodHook() {
                         @Override
-                        protected void beforeHookedMethod(MethodHookParam param) {
-                            log("MOVE ENTER: o0.d.q args=" + formatHookArgs(param.args));
-                        }
-
-                        @Override
                         protected void afterHookedMethod(MethodHookParam param) {
-                            if (!param.hasThrowable()) {
-                                log("MOVE RESULT: o0.d.q -> " + String.valueOf(param.getResult()));
-                                return;
-                            }
-
+                            if (!param.hasThrowable()) return;
                             Throwable t = param.getThrowable();
-                            log("MOVE THROW: o0.d.q " + t.getClass().getName()
-                                    + ": " + String.valueOf(t.getMessage()));
-
-                            if (String.valueOf(t.getMessage()).contains("failed to move")) {
-                                boolean recovered = recoverYellowPageMove(param.args);
-                                param.setThrowable(null);
-                                log("MOVE RECOVERY: suppressed o0.d.q failure; physicalMove=" + recovered
-                                        + "; readers redirected to .yellow_pages.dat.tmp");
+                            String message = String.valueOf(t.getMessage());
+                            if (message.contains("failed to move")) {
+                                diagnoseYellowPageMove(param.args);
                             }
                         }
                     });
-                    log("MOVE hook installed: " + method.toGenericString());
+                    log("MOVE diagnostic hook installed: " + method.toGenericString());
                 }
             } catch (Throwable e) {
-                log("MOVE hook install failed: " + e.getClass().getName()
-                        + ": " + String.valueOf(e.getMessage()));
+                log("MOVE diagnostic hook install failed: "
+                        + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
             }
 
             // o0.d.p wraps the underlying transport exception as a generic
