@@ -1513,7 +1513,13 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             log("CRITICAL Q.a THROW: " + param.getThrowable().getClass().getName()
                                     + ": " + String.valueOf(param.getThrowable().getMessage()));
                         } else {
-                            log("CRITICAL Q.a RESULT=" + String.valueOf(param.getResult()));
+                            Object result = param.getResult();
+                            if (Boolean.FALSE.equals(result) && isYellowPageContext(param.args)) {
+                                param.setResult(true);
+                                log("NETWORK GATE BYPASS: Q.a false -> true");
+                            } else {
+                                log("CRITICAL Q.a RESULT=" + String.valueOf(result));
+                            }
                         }
                     }
                 });
@@ -1621,6 +1627,22 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+    private static boolean isYellowPageContext(Object[] args) {
+        try {
+            if (args == null) return false;
+            for (Object arg : args) {
+                if (arg instanceof Context) {
+                    Context app = ((Context) arg).getApplicationContext();
+                    if (app != null && YELLOWPAGE.equals(app.getPackageName())) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
+    }
+
     private static boolean isInstanceOf(Object value, String className, ClassLoader cl) {
         try {
             Class<?> target = Class.forName(className, false, cl);
@@ -1645,8 +1667,14 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 XposedBridge.hookMethod(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
-                        log("NETWORK GATE: Permission.networkingAllowed -> "
-                                + String.valueOf(param.getResult()));
+                        Object result = param.getResult();
+                        if (Boolean.FALSE.equals(result) && isYellowPageContext(param.args)) {
+                            param.setResult(true);
+                            log("NETWORK GATE BYPASS: Permission.networkingAllowed false -> true");
+                        } else {
+                            log("NETWORK GATE: Permission.networkingAllowed -> "
+                                    + String.valueOf(result));
+                        }
                     }
                 });
                 log("hooked NETWORK GATE: Permission.networkingAllowed(Context)");
@@ -1683,6 +1711,36 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             XposedBridge.hookMethod(u, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                    // EEA request objects can enter H.u() with k=-1. That value
+                    // makes H.u() return 6 before j0.d() is reached. Normalize
+                    // only URL-bearing H objects owned by the Yellow Page process.
+                    try {
+                        Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+                        java.lang.reflect.Field k = j0.getDeclaredField("k");
+                        java.lang.reflect.Field cField = j0.getDeclaredField("c");
+                        java.lang.reflect.Field iField = j0.getDeclaredField("i");
+                        k.setAccessible(true);
+                        cField.setAccessible(true);
+                        iField.setAccessible(true);
+                        Object value = k.get(param.thisObject);
+                        Object url = cField.get(param.thisObject);
+                        Object ctx = iField.get(param.thisObject);
+                        boolean yellowContext = false;
+                        if (ctx instanceof Context) {
+                            Context app = ((Context) ctx).getApplicationContext();
+                            yellowContext = app != null && YELLOWPAGE.equals(app.getPackageName());
+                        }
+                        if (Integer.valueOf(-1).equals(value)
+                                && yellowContext
+                                && url != null
+                                && String.valueOf(url).startsWith("http")) {
+                            k.set(param.thisObject, 1);
+                            log("REQUEST MODE BYPASS: H.u k -1 -> 1 url=" + String.valueOf(url));
+                        }
+                    } catch (Throwable e) {
+                        log("REQUEST MODE BYPASS failed: " + e.getClass().getSimpleName());
+                    }
+
                     Object obj = param.thisObject;
                     StringBuilder state = new StringBuilder("H.u STATE:");
                     Class<?> current = obj == null ? null : obj.getClass();
