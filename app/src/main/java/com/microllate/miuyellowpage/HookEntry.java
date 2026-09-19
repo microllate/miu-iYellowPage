@@ -2167,6 +2167,51 @@ public class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    private static void hookYellowPageMoveHelper(ClassLoader cl) {
+        try {
+            Class<?> utility = Class.forName("com.miui.yellowpage.utils.x", false, cl);
+            Method move = utility.getDeclaredMethod(
+                    "b", java.io.File.class, java.io.File.class);
+            XposedBridge.hookMethod(move, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!(param.args[0] instanceof java.io.File)
+                            || !(param.args[1] instanceof java.io.File)) {
+                        return;
+                    }
+                    java.io.File source = (java.io.File) param.args[0];
+                    java.io.File target = (java.io.File) param.args[1];
+                    String sourcePath = source.getAbsolutePath();
+                    String targetPath = target.getAbsolutePath();
+                    if (!sourcePath.contains("yellow_pages.dat")
+                            || !targetPath.contains("yellow_pages.dat")) {
+                        return;
+                    }
+
+                    // x.b() is not a rename: it deletes/creates the target and
+                    // copies the source through Le1.c. On this ROM that copy path
+                    // returns false although a native rename succeeds. Use the
+                    // exact same-process rename as the successful primitive.
+                    try {
+                        android.system.Os.rename(sourcePath, targetPath);
+                        param.setResult(true);
+                        log("XELLOWPAGE_MOVE_BYPASS: Os.rename SUCCESS "
+                                + sourcePath + " -> " + targetPath);
+                    } catch (Throwable e) {
+                        log("XELLOWPAGE_MOVE_BYPASS: rename failed "
+                                + e.getClass().getSimpleName() + ":"
+                                + String.valueOf(e.getMessage()));
+                    }
+                }
+            });
+            log("XELLOWPAGE_MOVE_BYPASS hooked com.miui.yellowpage.utils.x.b(File,File)");
+        } catch (Throwable e) {
+            log("XELLOWPAGE_MOVE_BYPASS hook failed: "
+                    + e.getClass().getSimpleName() + ":"
+                    + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookYellowPageDownload(ClassLoader cl) {
         try {
             Class<?> d = Class.forName("o0.d", false, cl);
@@ -2204,6 +2249,7 @@ public class HookEntry implements IXposedHookLoadPackage {
             // yellow_pages.dat. Keep the downloaded .tmp file and transparently
             // redirect YellowPage readers to it instead of requiring a filesystem move.
             hookYellowPageDataFileReads(cl);
+            hookYellowPageMoveHelper(cl);
 
             // One-shot diagnosis of the real filesystem failure. Do not recover or suppress it.
             try {
