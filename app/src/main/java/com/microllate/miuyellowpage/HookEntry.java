@@ -1839,32 +1839,24 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     private static String runRootCommand(String command) {
         Process process = null;
         java.io.InputStream in = null;
-        java.io.InputStream err = null;
-        java.io.ByteArrayOutputStream outBytes = new java.io.ByteArrayOutputStream();
-        java.io.ByteArrayOutputStream errBytes = new java.io.ByteArrayOutputStream();
         try {
-            process = Runtime.getRuntime().exec(new String[]{"su", "-c", command});
+            ProcessBuilder builder = new ProcessBuilder("su", "-c", command);
+            builder.redirectErrorStream(true);
+            process = builder.start();
             in = process.getInputStream();
-            err = process.getErrorStream();
 
+            java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
             byte[] buffer = new byte[4096];
             int n;
             while ((n = in.read(buffer)) != -1) {
-                outBytes.write(buffer, 0, n);
-            }
-            while ((n = err.read(buffer)) != -1) {
-                errBytes.write(buffer, 0, n);
+                output.write(buffer, 0, n);
             }
 
             int exit = process.waitFor();
-            String stdout = outBytes.toString("UTF-8").trim();
-            String stderr = errBytes.toString("UTF-8").trim();
-
+            String text = output.toString("UTF-8").trim();
             log("ROOT CMD exit=" + exit
-                    + " stdout=" + (stdout.length() > 300 ? stdout.substring(0, 300) : stdout)
-                    + " stderr=" + (stderr.length() > 300 ? stderr.substring(0, 300) : stderr));
-
-            return exit == 0 ? stdout : null;
+                    + " output=" + (text.length() > 1200 ? text.substring(0, 1200) : text));
+            return exit == 0 ? text : null;
         } catch (Throwable e) {
             log("ROOT CMD FAILED: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
@@ -1874,10 +1866,6 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 if (in != null) in.close();
             } catch (Throwable ignored) {
             }
-            try {
-                if (err != null) err.close();
-            } catch (Throwable ignored) {
-            }
             if (process != null) {
                 try {
                     process.destroy();
@@ -1885,6 +1873,17 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 }
             }
         }
+    }
+
+    /*
+     * KernelSU normally keeps a root app in its own mount namespace. KernelSU's
+     * own FAQ documents nsenter -t 1 -m as the way to execute a command in the
+     * global mount namespace. Use this only for the final filesystem operation;
+     * the SELinux domain remains the KSU root domain.
+     */
+    private static String runRootGlobalMountCommand(String command) {
+        return runRootCommand(
+                "nsenter -t 1 -m -- /system/bin/sh -c " + shellQuote(command));
     }
 
     private static boolean recoverYellowPageMove(Object[] args) {
@@ -1954,28 +1953,60 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 return false;
             }
 
-            log("MOVE RECOVERY: root available; replacing target");
+            log("MOVE RECOVERY: root available; diagnosing target");
 
             String sourcePath = source.getAbsolutePath();
             String targetPath = target.getAbsolutePath();
+            String parentPath = parent == null ? "" : parent.getAbsolutePath();
 
-            String replaceCommand = "rm -f " + shellQuote(targetPath)
-                    + " && mv -f " + shellQuote(sourcePath)
-                    + " " + shellQuote(targetPath);
+            // First inspect the global mount namespace. If the YellowPage process
+            // inherited a restricted/read-only app mount, this is the namespace
+            // where the real /data tree is visible.
+            String diagnosticCommand =
+                    "id; getenforce; "
+                    + "ls -ldZ " + shellQuote(parentPath) + "; "
+                    + "ls -lZ " + shellQuote(targetPath) + " " + shellQuote(sourcePath) + "; "
+                    + "lsattr " + shellQuote(targetPath) + " " + shellQuote(sourcePath);
+            String diagnostic = runRootGlobalMountCommand(diagnosticCommand);
+            log("MOVE RECOVERY GLOBAL DIAG: "
+                    + (diagnostic == null ? "<failed>" : diagnostic));
 
-            String replaceResult = runRootCommand(replaceCommand);
-            if (replaceResult == null && target.isFile() && target.length() > 0) {
-                // Some su implementations produce no stdout on success; verify
-                // the actual filesystem result rather than relying only on output.
-                log("MOVE RECOVERY: root command returned failure");
-                return false;
-            }
-
-            // Restore the device's expected SELinux label if restorecon is present.
-            // Failure here is non-fatal; the actual replacement is already complete.
-            runRootCommand("restorecon " + shellQuote(targetPath));
+            // Clear an immutable file flag if present, then replace the file
+            // directly. Do this in PID 1's mount namespace first. KernelSU
+            // documents this nsenter pattern for escaping an app mount namespace.
+            String globalReplace =
+                    "chattr -i " + shellQuote(targetPath) + " 2>/dev/null; "
+                    + "mv -f " + shellQuote(sourcePath) + " " + shellQuote(targetPath);
+            String replaceResult = runRootGlobalMountCommand(globalReplace);
 
             boolean valid = target.isFile() && target.length() > 0 && !source.exists();
+            log("MOVE RECOVERY GLOBAL RESULT: command="
+                    + (replaceResult == null ? "<failed>" : replaceResult)
+                    + " valid=" + valid
+                    + " targetLength=" + target.length()
+                    + " sourceExists=" + source.exists());
+
+            // If the global namespace path did not work, retry in the current
+            // namespace. This covers devices where the app and global namespaces
+            // already expose the same writable tree.
+            if (!valid) {
+                String localReplace =
+                        "chattr -i " + shellQuote(targetPath) + " 2>/dev/null; "
+                        + "mv -f " + shellQuote(sourcePath) + " " + shellQuote(targetPath);
+                String localResult = runRootCommand(localReplace);
+                valid = target.isFile() && target.length() > 0 && !source.exists();
+                log("MOVE RECOVERY LOCAL RESULT: command="
+                        + (localResult == null ? "<failed>" : localResult)
+                        + " valid=" + valid
+                        + " targetLength=" + target.length()
+                        + " sourceExists=" + source.exists());
+            }
+
+            // Restore the device's expected SELinux label in the global namespace.
+            // Failure here is non-fatal; the data file itself is already replaced.
+            runRootGlobalMountCommand("restorecon " + shellQuote(targetPath));
+
+            valid = target.isFile() && target.length() > 0 && !source.exists();
             log("MOVE RECOVERY ROOT RESULT: valid=" + valid
                     + " targetLength=" + target.length()
                     + " sourceExists=" + source.exists());
