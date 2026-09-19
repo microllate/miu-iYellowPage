@@ -1804,6 +1804,20 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     protected void beforeHookedMethod(MethodHookParam param) {
                         log("HTTP PARSER ENTER: H." + name
                                 + " args=" + formatHookArgs(param.args));
+                        if ("w".equals(name)) {
+                            try {
+                                StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+                                StringBuilder out = new StringBuilder("H.w CALLER STACK:");
+                                int n = 0;
+                                for (StackTraceElement e : trace) {
+                                    if (String.valueOf(e).contains("HookEntry")) continue;
+                                    out.append(" | ").append(String.valueOf(e));
+                                    if (++n >= 18) break;
+                                }
+                                log(out.toString());
+                            } catch (Throwable ignored) {
+                            }
+                        }
                     }
 
                     @Override
@@ -2005,6 +2019,56 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     }
                 }
             });
+
+            // Some Yellow Page DB code uses compiled statements instead of
+            // SQLiteDatabase.insert/update. Trace those paths too.
+            try {
+                Class<?> stmt = Class.forName("android.database.sqlite.SQLiteStatement", false, cl);
+                for (Method method : stmt.getDeclaredMethods()) {
+                    if (!"executeInsert".equals(method.getName())
+                            && !"executeUpdateDelete".equals(method.getName())) {
+                        continue;
+                    }
+                    XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            log("DB WRITE STATEMENT ENTER: " + method.getName()
+                                    + " sql=" + String.valueOf(XposedHelpers.callMethod(
+                                            param.thisObject, "toString")));
+                        }
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) {
+                            if (param.hasThrowable()) {
+                                log("DB WRITE STATEMENT THROW: " + method.getName()
+                                        + " " + param.getThrowable().getClass().getSimpleName());
+                            } else {
+                                log("DB WRITE STATEMENT RESULT: " + method.getName()
+                                        + " -> " + String.valueOf(param.getResult()));
+                            }
+                        }
+                    });
+                }
+                log("hooked YellowPage SQLiteStatement write methods");
+            } catch (Throwable e) {
+                log("SQLiteStatement hook failed: " + e.getClass().getSimpleName());
+            }
+
+            try {
+                Method exec = db.getDeclaredMethod("execSQL", String.class);
+                XposedBridge.hookMethod(exec, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        String sql = String.valueOf(param.args[0]);
+                        String lower = sql.toLowerCase(java.util.Locale.ROOT);
+                        if (lower.contains("yellow_page") || lower.contains("phone_lookup")) {
+                            log("DB WRITE EXECSQL: " + sql);
+                        }
+                    }
+                });
+                log("hooked YellowPage SQLiteDatabase.execSQL");
+            } catch (Throwable e) {
+                log("SQLite execSQL hook failed: " + e.getClass().getSimpleName());
+            }
 
             log("hooked YellowPage SQLite write methods");
         } catch (Throwable e) {
