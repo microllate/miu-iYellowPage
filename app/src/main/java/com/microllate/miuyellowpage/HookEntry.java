@@ -1639,7 +1639,9 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                         .append(" static=").append(Modifier.isStatic(method.getModifiers()));
                 log("REGION PARAM METHOD: " + shape);
 
-                if (!"e".equals(method.getName())) {
+                if (!"e".equals(method.getName())
+                        && !"b".equals(method.getName())
+                        && !"d".equals(method.getName())) {
                     continue;
                 }
 
@@ -1658,19 +1660,23 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 if (!(arg instanceof java.util.Map)) continue;
 
                                 java.util.Map<?, ?> map = (java.util.Map<?, ?>) arg;
-                                log("REGION PARAM MAP[" + i + "]: keys="
-                                        + String.valueOf(map.keySet())
-                                        + " region=" + String.valueOf(map.get("region"))
-                                        + " locid=" + String.valueOf(map.get("locid")));
+                                Object region = map.get("region");
+                                Object locid = map.get("locid");
+                                log("REGION PARAM MAP[" + i + "]: method=" + target.getName()
+                                        + " keys=" + String.valueOf(map.keySet())
+                                        + " region=" + String.valueOf(region)
+                                        + " locid=" + String.valueOf(locid));
 
+                                @SuppressWarnings("unchecked")
+                                java.util.Map<Object, Object> mutable =
+                                        (java.util.Map<Object, Object>) map;
                                 if (map.containsKey("region")) {
-                                    @SuppressWarnings("unchecked")
-                                    java.util.Map<Object, Object> mutable =
-                                            (java.util.Map<Object, Object>) map;
-                                    Object original = mutable.get("region");
                                     mutable.put("region", "CN");
-                                    log("REGION PARAM FORCE: region "
-                                            + String.valueOf(original) + " -> CN");
+                                    log("REGION PARAM FORCE: " + target.getName()
+                                            + " region " + String.valueOf(region) + " -> CN");
+                                } else if ("b".equals(target.getName())) {
+                                    mutable.put("region", "CN");
+                                    log("REGION PARAM FORCE: b(Map) added region=CN");
                                 }
                             }
                         } catch (Throwable e) {
@@ -1697,10 +1703,11 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                 });
 
                 eCount++;
-                log("hooked YellowPage runtime k0.e overload: " + shape);
+                log("hooked YellowPage runtime k0." + target.getName()
+                        + " overload: " + shape);
             }
 
-            log("REGION PARAM e() overloads hooked=" + eCount);
+            log("REGION PARAM e/b/d overloads hooked=" + eCount);
         } catch (Throwable e) {
             log("REGION PARAM runtime scan failed: " + e.getClass().getName()
                     + ": " + String.valueOf(e.getMessage()));
