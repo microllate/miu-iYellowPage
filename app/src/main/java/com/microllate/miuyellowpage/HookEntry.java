@@ -507,30 +507,58 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             if (param.hasThrowable() || !(param.getResult() instanceof java.io.InputStream)) return;
-                            java.io.InputStream in = (java.io.InputStream) param.getResult();
-                            try {
-                                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-                                byte[] buf = new byte[4096];
-                                int total = 0;
-                                int n;
-                                while (total < 65536 && (n = in.read(buf, 0, Math.min(buf.length, 65536 - total))) > 0) {
-                                    out.write(buf, 0, n);
-                                    total += n;
+                            final java.io.InputStream original = (java.io.InputStream) param.getResult();
+                            if (original instanceof java.io.FilterInputStream) return;
+                            java.io.FilterInputStream tee = new java.io.FilterInputStream(original) {
+                                private final java.io.ByteArrayOutputStream capture = new java.io.ByteArrayOutputStream();
+                                private int total;
+                                private boolean dumped;
+
+                                private void record(byte[] b, int off, int len) {
+                                    if (len <= 0 || total >= 65536) return;
+                                    int take = Math.min(len, 65536 - total);
+                                    capture.write(b, off, take);
+                                    total += take;
                                 }
-                                byte[] data = out.toByteArray();
-                                String body;
-                                try {
-                                    body = new String(data, java.nio.charset.StandardCharsets.UTF_8);
-                                } catch (Throwable e) {
-                                    body = java.util.Arrays.toString(data);
+
+                                private void dumpIfNeeded() {
+                                    if (dumped) return;
+                                    dumped = true;
+                                    byte[] data = capture.toByteArray();
+                                    String body;
+                                    try {
+                                        body = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+                                    } catch (Throwable e) {
+                                        body = java.util.Arrays.toString(data);
+                                    }
+                                    if (body.length() > 12000) body = body.substring(0, 12000);
+                                    log("HTTP BODY CAPTURE URL: " + url);
+                                    log("HTTP BODY CAPTURE BYTES: " + data.length);
+                                    log("HTTP BODY CAPTURE TEXT: " + body);
                                 }
-                                if (body.length() > 12000) body = body.substring(0, 12000);
-                                log("HTTP BODY CAPTURE URL: " + url);
-                                log("HTTP BODY CAPTURE BYTES: " + data.length);
-                                log("HTTP BODY CAPTURE TEXT: " + body);
-                            } catch (Throwable e) {
-                                log("HTTP BODY CAPTURE THROW: " + e.getClass().getName() + ": " + e.getMessage());
-                            }
+
+                                @Override public int read() throws java.io.IOException {
+                                    int v = super.read();
+                                    if (v >= 0) {
+                                        byte[] one = {(byte) v};
+                                        record(one, 0, 1);
+                                    } else dumpIfNeeded();
+                                    return v;
+                                }
+
+                                @Override public int read(byte[] b, int off, int len) throws java.io.IOException {
+                                    int n = super.read(b, off, len);
+                                    if (n > 0) record(b, off, n);
+                                    else if (n < 0) dumpIfNeeded();
+                                    return n;
+                                }
+
+                                @Override public void close() throws java.io.IOException {
+                                    try { dumpIfNeeded(); } finally { super.close(); }
+                                }
+                            };
+                            param.setResult(tee);
+                            log("HTTP BODY CAPTURE WRAPPED: " + url);
                         }
                     });
                     log("HTTP BODY CAPTURE HOOKED: " + cls.getName() + ".getInputStream()");
