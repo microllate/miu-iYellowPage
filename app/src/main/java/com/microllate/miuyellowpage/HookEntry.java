@@ -1618,6 +1618,74 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         log("CRITICAL GATES INSTALL END");
     }
 
+    private static void hookYellowPageRegionParam(ClassLoader cl) {
+        try {
+            Class<?> k0 = Class.forName("com.miui.yellowpage.utils.k0", false, cl);
+            int found = 0;
+            for (Method method : k0.getDeclaredMethods()) {
+                if (!"e".equals(method.getName())
+                        || !Modifier.isStatic(method.getModifiers())
+                        || method.getParameterTypes().length != 1
+                        || method.getParameterTypes()[0] != java.util.Map.class
+                        || method.getReturnType() != String.class) {
+                    continue;
+                }
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            Object arg = param.args != null && param.args.length > 0
+                                    ? param.args[0] : null;
+                            if (arg instanceof java.util.Map) {
+                                java.util.Map<?, ?> map = (java.util.Map<?, ?>) arg;
+                                Object original = map.get("region");
+                                log("REGION PARAM ENTER: k0.e region="
+                                        + String.valueOf(original)
+                                        + " keys=" + String.valueOf(map.keySet()));
+
+                                if (map.containsKey("region")) {
+                                    @SuppressWarnings("unchecked")
+                                    java.util.Map<Object, Object> mutable =
+                                            (java.util.Map<Object, Object>) map;
+                                    mutable.put("region", "CN");
+                                    log("REGION PARAM FORCE: "
+                                            + String.valueOf(original) + " -> CN");
+                                }
+                            }
+                        } catch (Throwable e) {
+                            log("REGION PARAM FORCE FAILED: "
+                                    + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            log("REGION PARAM THROW: "
+                                    + param.getThrowable().getClass().getName() + ": "
+                                    + String.valueOf(param.getThrowable().getMessage()));
+                            return;
+                        }
+                        Object result = param.getResult();
+                        String text = String.valueOf(result);
+                        if (text.length() > 500) text = text.substring(0, 500);
+                        log("REGION PARAM RESULT: _encparam=" + text);
+                    }
+                });
+                found++;
+                log("hooked YellowPage region builder: k0.e(Map)->String");
+            }
+
+            if (found == 0) {
+                log("REGION PARAM: k0.e(Map)->String not found");
+            }
+        } catch (Throwable e) {
+            log("REGION PARAM hook failed: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookYellowPageActualRequestBuilder(ClassLoader cl) {
         try {
             Class<?> builder = Class.forName("o0.b", false, cl);
@@ -2664,6 +2732,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             hookYellowPageRequestMode(cl);
             hookYellowPageWStatus(cl);
             hookYellowPageActualRequestBuilder(cl);
+            hookYellowPageRegionParam(cl);
             hookGlobalHttpsConnection(cl);
             try {
                 log("CRITICAL CALL BEFORE");
