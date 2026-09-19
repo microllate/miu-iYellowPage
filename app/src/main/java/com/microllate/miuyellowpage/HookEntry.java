@@ -101,6 +101,31 @@ public class HookEntry implements IXposedHookLoadPackage {
                         if (!param.hasThrowable() && Boolean.FALSE.equals(param.getResult())) {
                             param.setResult(true);
                         }
+                        if (!param.hasThrowable() && Boolean.TRUE.equals(param.getResult())) {
+                            try {
+                                Context ctx = param.args != null && param.args.length > 0
+                                        && param.args[0] instanceof Context
+                                        ? (Context) param.args[0] : null;
+                                if (ctx != null) {
+                                    Class<?> dbHelper = Class.forName(
+                                            "com.miui.yellowpage.providers.yellowpage.YellowPageDatabaseHelper",
+                                            false, cl);
+                                    Object helper = XposedHelpers.callStaticMethod(
+                                            dbHelper, "E", ctx);
+                                    android.database.sqlite.SQLiteDatabase db =
+                                            (android.database.sqlite.SQLiteDatabase)
+                                                    XposedHelpers.callMethod(
+                                                            helper, "getWritableDatabase");
+                                    Class<?> preset = Class.forName("f0.h", false, cl);
+                                    XposedHelpers.callStaticMethod(preset, "a", ctx, db);
+                                    log("DATA IMPORT TRIGGER: f0.h.a() invoked after sync");
+                                }
+                            } catch (Throwable e) {
+                                log("DATA IMPORT TRIGGER FAILED: "
+                                        + e.getClass().getSimpleName() + ": "
+                                        + String.valueOf(e.getMessage()));
+                            }
+                        }
                     }
                 });
                 log("PullTask gate hooked: o0.g.y(Context)");
