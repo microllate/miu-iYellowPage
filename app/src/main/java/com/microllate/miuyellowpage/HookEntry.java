@@ -1987,7 +1987,7 @@ public class HookEntry implements IXposedHookLoadPackage {
                         StackTraceElement[] trace = Thread.currentThread().getStackTrace();
                         for (StackTraceElement e : trace) {
                             String n = String.valueOf(e.getClassName());
-                            if (n.startsWith("com.miui.yellowpage.") || n.startsWith("o0.")) {
+                            if (n.startsWith("com.miui.yellowpage.") || n.startsWith("o0.")\n                            || n.startsWith("r0.") || n.startsWith("h0.")\n                            || n.startsWith("f0.")) {
                                 return true;
                             }
                         }
