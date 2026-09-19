@@ -879,10 +879,13 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     private static void hookYellowPageLiveHttp(ClassLoader cl) {
         try {
             Class<?> conn = Class.forName(
-                    "com.android.okhttp.internal.huc.HttpURLConnectionImpl",
+                    "com.android.okhttp.internal.huc.HttpsURLConnectionImpl",
                     false, cl);
             int found = 0;
-            for (Method method : conn.getDeclaredMethods()) {
+            Class<?> current = conn;
+            int depth = 0;
+            while (current != null && current != Object.class && depth < 6) {
+            for (Method method : current.getDeclaredMethods()) {
                 final String name = method.getName();
                 if (!"connect".equals(name)
                         && !"getResponseCode".equals(name)
@@ -938,8 +941,11 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                     }
                 });
                 found++;
-                log("hooked LIVE HTTP: " + name
+                log("hooked LIVE HTTP: " + current.getName() + "." + name
                         + "(" + method.getParameterTypes().length + " args)");
+            }
+            current = current.getSuperclass();
+            depth++;
             }
             log("LIVE HTTP hooks installed: " + found);
         } catch (Throwable e) {
