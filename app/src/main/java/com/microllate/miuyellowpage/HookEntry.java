@@ -1451,6 +1451,56 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         log("CRITICAL GATES INSTALL END");
     }
 
+    private static void hookYellowPageActualRequestBuilder(ClassLoader cl) {
+        try {
+            Class<?> builder = Class.forName("o0.b", false, cl);
+            int found = 0;
+            for (Method method : builder.getDeclaredMethods()) {
+                if (!"j".equals(method.getName())) {
+                    continue;
+                }
+                final Method target = method;
+                XposedBridge.hookMethod(target, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable() || param.getResult() == null) {
+                            return;
+                        }
+                        Object result = param.getResult();
+                        if (!"com.miui.yellowpage.utils.H".equals(result.getClass().getName())) {
+                            return;
+                        }
+                        try {
+                            Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+                            java.lang.reflect.Field k = j0.getDeclaredField("k");
+                            k.setAccessible(true);
+                            Object old = k.get(result);
+                            log("ACTUAL REQUEST BUILDER: o0.b.j -> H k=" + String.valueOf(old));
+                            if (Integer.valueOf(-1).equals(old)) {
+                                Method setter = j0.getDeclaredMethod("j", Integer.TYPE);
+                                setter.setAccessible(true);
+                                setter.invoke(result, 1);
+                                log("ACTUAL REQUEST BUILDER: forced H.k -1 -> 1");
+                            }
+                        } catch (Throwable e) {
+                            log("ACTUAL REQUEST BUILDER force failed: "
+                                    + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
+                        }
+                    }
+                });
+                found++;
+                log("hooked ACTUAL REQUEST BUILDER: o0.b." + target.getName()
+                        + "(" + target.getParameterTypes().length + " args)");
+            }
+            if (found == 0) {
+                log("ACTUAL REQUEST BUILDER: o0.b.j not found");
+            }
+        } catch (Throwable e) {
+            log("ACTUAL REQUEST BUILDER hook failed: " + e.getClass().getName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+    }
+
     private static void hookYellowPageRequestMode(ClassLoader cl) {
         try {
             Class<?> taskBase = Class.forName("o0.a", false, cl);
@@ -2242,6 +2292,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
             ClassLoader cl = lpparam.classLoader;
             log("YELLOWPAGE LOAD ENTER classLoader=" + String.valueOf(cl));
             hookYellowPageRequestMode(cl);
+            hookYellowPageActualRequestBuilder(cl);
             try {
                 log("CRITICAL CALL BEFORE");
                 hookCriticalYellowPageGates(cl);
