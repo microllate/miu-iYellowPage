@@ -873,6 +873,78 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
         }
     }
 
+
+    private static void hookYellowPageLiveHttp(ClassLoader cl) {
+        try {
+            Class<?> conn = Class.forName(
+                    "com.android.okhttp.internal.huc.HttpURLConnectionImpl",
+                    false, cl);
+            int found = 0;
+            for (Method method : conn.getDeclaredMethods()) {
+                final String name = method.getName();
+                if (!"connect".equals(name)
+                        && !"getResponseCode".equals(name)
+                        && !"getResponseMessage".equals(name)
+                        && !"getInputStream".equals(name)
+                        && !"getErrorStream".equals(name)
+                        && !"getContent".equals(name)) {
+                    continue;
+                }
+
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        try {
+                            Object target = param.thisObject;
+                            java.net.HttpURLConnection c =
+                                    target instanceof java.net.HttpURLConnection
+                                            ? (java.net.HttpURLConnection) target : null;
+                            log("LIVE HTTP ENTER: " + name
+                                    + " url=" + (c == null ? "?" : String.valueOf(c.getURL())));
+                        } catch (Throwable e) {
+                            log("LIVE HTTP ENTER: " + name);
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("LIVE HTTP THROW: " + name + " "
+                                    + t.getClass().getName() + ": "
+                                    + String.valueOf(t.getMessage()));
+                            return;
+                        }
+                        Object result = param.getResult();
+                        String text = String.valueOf(result);
+                        if (text.length() > 1500) text = text.substring(0, 1500);
+                        log("LIVE HTTP RESULT: " + name + " -> " + text
+                                + " class=" + (result == null
+                                ? "null" : result.getClass().getName()));
+
+                        if ("getResponseCode".equals(name)) {
+                            try {
+                                java.net.HttpURLConnection c =
+                                        (java.net.HttpURLConnection) param.thisObject;
+                                log("LIVE HTTP RESPONSE: code=" + c.getResponseCode()
+                                        + " message=" + c.getResponseMessage()
+                                        + " contentType=" + c.getContentType()
+                                        + " length=" + c.getContentLengthLong());
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    }
+                });
+                found++;
+                log("hooked LIVE HTTP: " + name
+                        + "(" + method.getParameterTypes().length + " args)");
+            }
+            log("LIVE HTTP hooks installed: " + found);
+        } catch (Throwable e) {
+            log("LIVE HTTP hook failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookMeteredNetworkGuard(ClassLoader cl) {
         try {
             Class<?> cm = Class.forName("android.net.ConnectivityManager", false, cl);
@@ -1324,6 +1396,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookPullTaskExecution(cl);
                             hookYellowPageHttpDecision(cl);
                             hookYellowPageHttpBase(cl);
+                            hookYellowPageLiveHttp(cl);
                             hookYellowPageDatabaseWrites(cl);
                             hookPullTaskPipeline(cl, context);
                             hookMeteredNetworkGuard(cl);
