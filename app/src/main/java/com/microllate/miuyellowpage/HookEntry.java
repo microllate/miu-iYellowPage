@@ -165,7 +165,86 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
     private static void hookJobDispatcher(ClassLoader cl) {
         try {
-            Class<?> dispatcher = Class.forName("a0.C0166b", false, cl);
+            Class<?> dispatcher = null;
+
+            // JADX reports this class as a0.C0166b, but some EEA builds can
+            // expose the obfuscated package/class through a different dex
+            // loading path. Try the exact name first, then locate the class
+            // by the unique dispatcher method signatures.
+            try {
+                dispatcher = Class.forName("a0.C0166b", false, cl);
+            } catch (Throwable ignored) {
+                // Fall through to dex scan.
+            }
+
+            if (dispatcher == null) {
+                java.util.ArrayList<String> paths = new java.util.ArrayList<>();
+                try {
+                    android.content.Context app = (android.content.Context)
+                            XposedHelpers.callStaticMethod(
+                                    Class.forName("android.app.ActivityThread", false, cl),
+                                    "currentApplication");
+                    if (app != null) {
+                        paths.add(app.getApplicationInfo().sourceDir);
+                        String[] splits = app.getApplicationInfo().splitSourceDirs;
+                        if (splits != null) {
+                            for (String split : splits) {
+                                if (split != null && !paths.contains(split)) paths.add(split);
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+
+                for (String apkPath : paths) {
+                    DexFile dex = new DexFile(apkPath);
+                    try {
+                        Enumeration<String> entries = dex.entries();
+                        while (entries.hasMoreElements() && dispatcher == null) {
+                            String name = entries.nextElement();
+                            if (name.indexOf('.') < 0) continue;
+                            try {
+                                Class<?> candidate = Class.forName(name, false, cl);
+                                boolean hasA = false;
+                                boolean hasE = false;
+                                for (Method m : candidate.getDeclaredMethods()) {
+                                    Class<?>[] p = m.getParameterTypes();
+                                    if ("a".equals(m.getName())
+                                            && Modifier.isStatic(m.getModifiers())
+                                            && m.getReturnType() == Boolean.TYPE
+                                            && p.length == 2
+                                            && p[0] == Context.class
+                                            && p[1] == Integer.TYPE) {
+                                        hasA = true;
+                                    }
+                                    if ("e".equals(m.getName())
+                                            && Modifier.isStatic(m.getModifiers())
+                                            && m.getReturnType() == Void.TYPE
+                                            && p.length == 3
+                                            && p[0] == Context.class
+                                            && p[1] == Integer.TYPE
+                                            && p[2] == Boolean.TYPE) {
+                                        hasE = true;
+                                    }
+                                }
+                                if (hasA && hasE) {
+                                    dispatcher = candidate;
+                                    log("JobDispatcher class found by method shape: "
+                                            + candidate.getName());
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    } finally {
+                        dex.close();
+                    }
+                }
+            }
+
+            if (dispatcher == null) {
+                log("JobDispatcher class not found");
+                return;
+            }
 
             // EEA disables pull_task_job through i.f(Context). Restore only
             // the Yellow Page pull job gate; leave the other jobs untouched.
@@ -510,6 +589,8 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                     param.thisObject, "getContext");
                             log("YellowPageProvider.onCreate");
                             hookYellowPagePullTask(cl, context);
+                            hookYellowPageJobServices(cl, context);
+                            hookPullTaskExecution(cl);
                             hookJobDispatcher(cl);
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
