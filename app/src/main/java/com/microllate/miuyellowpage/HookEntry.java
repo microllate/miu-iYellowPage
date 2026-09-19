@@ -751,6 +751,73 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
 
 
     private static void hookYellowPageHttpDecision(ClassLoader cl) {
+        // Trace the real j0.k setter. H.u() returns 6 immediately for k values other than 0/1.
+        try {
+            Class<?> j0 = Class.forName("com.miui.yellowpage.utils.j0", false, cl);
+            Method setter = j0.getDeclaredMethod("j", Integer.TYPE);
+            XposedBridge.hookMethod(setter, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    int value = param.args != null && param.args.length > 0 && param.args[0] instanceof Integer
+                            ? (Integer) param.args[0] : Integer.MIN_VALUE;
+                    log("J0.K SET: value=" + value + " object="
+                            + (param.thisObject == null ? "null" : param.thisObject.getClass().getName()));
+                    if (value == -1) {
+                        try {
+                            StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+                            StringBuilder stack = new StringBuilder("J0.K SET -1 STACK:");
+                            int count = 0;
+                            for (StackTraceElement element : trace) {
+                                String frame = String.valueOf(element);
+                                if (frame.contains("HookEntry")) continue;
+                                stack.append(" | ").append(frame);
+                                if (++count >= 8) break;
+                            }
+                            log(stack.toString());
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                }
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.hasThrowable()) {
+                        Throwable t = param.getThrowable();
+                        log("J0.K SET THROW: " + t.getClass().getName() + ": " + String.valueOf(t.getMessage()));
+                    }
+                }
+            });
+            log("hooked J0.k setter: j0.j(int) -> field k");
+        } catch (Throwable e) {
+            log("J0.k setter hook failed: " + e.getClass().getSimpleName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+
+        // Trace Q.a(Context), the second gate used by H.u() when k == 0.
+        try {
+            Class<?> q = Class.forName("Q.a", false, cl);
+            Method qMethod = q.getDeclaredMethod("a", Context.class);
+            if (!Modifier.isStatic(qMethod.getModifiers()) || qMethod.getReturnType() != Boolean.TYPE) {
+                log("NETWORK GATE Q.a signature mismatch");
+            } else {
+                XposedBridge.hookMethod(qMethod, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (param.hasThrowable()) {
+                            Throwable t = param.getThrowable();
+                            log("NETWORK GATE: Q.a(Context) THROW: " + t.getClass().getName()
+                                    + ": " + String.valueOf(t.getMessage()));
+                        } else {
+                            log("NETWORK GATE: Q.a(Context) -> " + String.valueOf(param.getResult()));
+                        }
+                    }
+                });
+                log("hooked NETWORK GATE: Q.a(Context)");
+            }
+        } catch (Throwable e) {
+            log("NETWORK GATE Q.a hook failed: " + e.getClass().getSimpleName()
+                    + ": " + String.valueOf(e.getMessage()));
+        }
+
         try {
             Class<?> http = Class.forName("com.miui.yellowpage.utils.H", false, cl);
             // H extends the actual j0 networking class. Hook the concrete
