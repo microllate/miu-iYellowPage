@@ -1510,7 +1510,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             // the exact j0.d()/getInputStream path without changing it.
                             try {
                                 Object owner = param.thisObject;
-                                if (owner instanceof com.miui.yellowpage.utils.j0) {
+                                if (owner != null) {
                                     Method d = owner.getClass().getMethod("d");
                                     Object conn = d.invoke(owner);
                                     if (conn instanceof java.net.HttpURLConnection) {
