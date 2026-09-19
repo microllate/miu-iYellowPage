@@ -2232,7 +2232,29 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                                 c = c.getCause();
                             }
                         } else {
-                            log("DOWNLOAD RESULT: o0.d.p -> " + String.valueOf(param.getResult()));
+                            Object result = param.getResult();
+                            log("DOWNLOAD RESULT: o0.d.p -> " + String.valueOf(result)
+                                    + " returnType=" + target.getReturnType().getName());
+                            if (result == null) {
+                                Class<?> rt = target.getReturnType();
+                                String tempPath = "/data/user/0/com.miui.yellowpage/files/.yellow_pages.dat.tmp";
+                                try {
+                                    if (rt == java.io.File.class) {
+                                        param.setResult(new java.io.File(tempPath));
+                                        log("DOWNLOAD RESULT FALLBACK: null -> temp File");
+                                    } else if (rt == String.class) {
+                                        param.setResult(tempPath);
+                                        log("DOWNLOAD RESULT FALLBACK: null -> temp String");
+                                    } else if (rt == Boolean.TYPE || rt == Boolean.class) {
+                                        param.setResult(Boolean.TRUE);
+                                        log("DOWNLOAD RESULT FALLBACK: null -> true");
+                                    }
+                                } catch (Throwable fallback) {
+                                    log("DOWNLOAD RESULT FALLBACK FAILED: "
+                                            + fallback.getClass().getName() + ": "
+                                            + String.valueOf(fallback.getMessage()));
+                                }
+                            }
                         }
                     }
                 });
