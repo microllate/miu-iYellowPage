@@ -390,6 +390,92 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
     }
 
 
+    private static void hookMeteredNetworkGuard(ClassLoader cl) {
+        try {
+            Class<?> cm = Class.forName("android.net.ConnectivityManager", false, cl);
+            Method metered = cm.getDeclaredMethod("isActiveNetworkMetered");
+            XposedBridge.hookMethod(metered, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    log("Metered guard: ConnectivityManager.isActiveNetworkMetered() -> false");
+                    param.setResult(false);
+                }
+            });
+            log("hooked ConnectivityManager.isActiveNetworkMetered()");
+        } catch (Throwable e) {
+            log("Metered ConnectivityManager hook failed: " + e.getClass().getSimpleName());
+        }
+
+        try {
+            Class<?> nc = Class.forName("android.net.NetworkCapabilities", false, cl);
+            Method hasCapability = nc.getDeclaredMethod("hasCapability", Integer.TYPE);
+            XposedBridge.hookMethod(hasCapability, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    if (param.args.length == 1
+                            && param.args[0] instanceof Integer
+                            && ((Integer) param.args[0]) == 11) {
+                        log("Metered guard: NetworkCapabilities.NOT_METERED -> true");
+                        param.setResult(true);
+                    }
+                }
+            });
+            log("hooked NetworkCapabilities.hasCapability(int)");
+        } catch (Throwable e) {
+            log("Metered NetworkCapabilities hook failed: " + e.getClass().getSimpleName());
+        }
+
+        try {
+            Class<?> job = Class.forName("com.miui.yellowpage.job.a", false, cl);
+            int found = 0;
+            for (Method method : job.getDeclaredMethods()) {
+                if (!"e".equals(method.getName())) {
+                    continue;
+                }
+                final Class<?> returnType = method.getReturnType();
+                XposedBridge.hookMethod(method, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        Throwable t = param.getThrowable();
+                        if (t == null || !(t instanceof java.io.IOException)) {
+                            return;
+                        }
+                        String msg = t.getMessage();
+                        if (msg == null || !msg.toLowerCase().contains("metered")) {
+                            return;
+                        }
+                        log("Metered guard: suppressed job.a.e() exception: " + msg);
+                        if (returnType == Void.TYPE) {
+                            param.setResult(null);
+                        } else if (!returnType.isPrimitive()) {
+                            param.setResult(null);
+                        } else if (returnType == Boolean.TYPE) {
+                            param.setResult(false);
+                        } else if (returnType == Long.TYPE) {
+                            param.setResult(0L);
+                        } else if (returnType == Integer.TYPE
+                                || returnType == Short.TYPE
+                                || returnType == Byte.TYPE
+                                || returnType == Character.TYPE) {
+                            param.setResult(0);
+                        } else if (returnType == Float.TYPE) {
+                            param.setResult(0f);
+                        } else if (returnType == Double.TYPE) {
+                            param.setResult(0d);
+                        } else if (returnType == Boolean.TYPE) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+                found++;
+                log("hooked YellowPage job.a.e() #" + found + " return=" + returnType.getName());
+            }
+            log("YellowPage metered exception fallback hooks installed: " + found);
+        } catch (Throwable e) {
+            log("YellowPage job.a.e() metered fallback failed: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static void hookPullTaskPipeline(ClassLoader cl) {
         try {
             // Job 0 does not call PullTask.y() directly. The real chain is:
@@ -661,6 +747,7 @@ private static void hookYellowPagePullTask(ClassLoader cl, Context context) {
                             hookYellowPageJobServices(cl, context);
                             hookPullTaskExecution(cl);
                             hookPullTaskPipeline(cl);
+                            hookMeteredNetworkGuard(cl);
                             hookJobDispatcher(cl, context);
                             importYellowPageData(cl, context, dbHelperClass);
                         } catch (Throwable e) {
